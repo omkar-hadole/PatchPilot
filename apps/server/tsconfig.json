@@ -6,10 +6,10 @@
     "outDir": "dist",
     "rootDir": "src",
     "paths": {
-      "@byter/agent": ["../../packages/agent/src/index.ts"],
-      "@byter/core": ["../../packages/core/src/index.js"],
-      "@byter/github-mcp": ["../github-mcp/src/index.ts"],
-      "@byter/github": ["../../packages/github/src/index.js"]
+      "@patchpilot/agent": ["../../packages/agent/src/index.ts"],
+      "@patchpilot/core": ["../../packages/core/src/index.js"],
+      "@patchpilot/github-mcp": ["../github-mcp/src/index.ts"],
+      "@patchpilot/github": ["../../packages/github/src/index.js"]
     }
   },
   "references": [

@@ -4,27 +4,27 @@ import { appendFile, mkdir, open, readFile, stat, unlink, writeFile } from "node
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { PatchPilotHarnessRuntime, modelClientFromEnv } from "@byter/agent";
+import { PatchPilotHarnessRuntime, modelClientFromEnv } from "@patchpilot/agent";
 import {
   approvalPayloadHash,
   createGitHubMcpHttpHandler,
   type GitHubRestClientLike
-} from "@byter/github-mcp";
+} from "@patchpilot/github-mcp";
 import type {
   ResolveToolApprovalInput,
-  StartByterSessionInput,
-  StartByterSessionResult,
+  StartPatchPilotSessionInput,
+  StartPatchPilotSessionResult,
   TrueForgeTurn,
   TrueForgeRuntimeEventListener,
   TrueForgeRuntimeEvent
-} from "@byter/agent";
-import { canTransition, createRun, scanIssueText, transitionRun } from "@byter/core";
+} from "@patchpilot/agent";
+import { canTransition, createRun, scanIssueText, transitionRun } from "@patchpilot/core";
 import {
   GitHubRestClient,
   parseIssueCommentWebhook,
   parseIssueWebhook,
   verifyGitHubWebhook
-} from "@byter/github";
+} from "@patchpilot/github";
 
 import { PostgresStore } from "./db.js";
 
@@ -40,11 +40,11 @@ const maxHarnessEvents = 120;
 const maxHarnessTextBytes = 4 * 1024;
 const duplicateIssueTriggerWindowMs = 60_000;
 
-export interface ByterServerOptions {
+export interface PatchPilotServerOptions {
   staticDir?: string;
   dataDir?: string;
   postgresStore?: PostgresStore;
-  trueForgeRuntime?: ByterSessionStarter;
+  trueForgeRuntime?: PatchPilotSessionStarter;
   mcpHandler?: McpRequestHandler;
   githubClient?: GitHubRestClientLike;
 }
@@ -96,7 +96,7 @@ interface HarnessTraceEvent {
   at: string;
   type: string;
   category: HarnessEventCategory;
-  source: "trueforge" | "byter";
+  source: "trueforge" | "patchpilot";
   status: "info" | "running" | "passed" | "failed";
   summary: string;
   toolName?: string;
@@ -111,8 +111,8 @@ interface HarnessTraceEvent {
   artifact?: string;
 }
 
-interface ByterSessionStarter {
-  startSession(input: StartByterSessionInput): Promise<StartByterSessionResult>;
+interface PatchPilotSessionStarter {
+  startSession(input: StartPatchPilotSessionInput): Promise<StartPatchPilotSessionResult>;
   requestProofContract?(sessionId: string): Promise<TrueForgeTurn>;
   resolveToolApproval?(input: ResolveToolApprovalInput): Promise<TrueForgeTurn>;
   subscribeToTurn?(sessionId: string, turnId: string, onEvent?: TrueForgeRuntimeEventListener): Promise<TrueForgeRuntimeEvent[]>;
@@ -129,8 +129,8 @@ interface PersistedWebhookRunRecord {
   dashboardUrl?: string;
   githubStatusComment?: { id?: number; url: string };
   githubComments?: Array<{ id?: number; url: string; kind: GitHubCommentKind; createdAt: string }>;
-  verifiedLabel?: { name: "byter:verified"; appliedAt?: string; error?: string };
-  approvalLabel?: { name: "byter:awaiting-approval"; appliedAt?: string; error?: string };
+  verifiedLabel?: { name: "patchpilot:verified"; appliedAt?: string; error?: string };
+  approvalLabel?: { name: "patchpilot:awaiting-approval"; appliedAt?: string; error?: string };
   lifecycleLabels?: Array<{ name: string; appliedAt?: string; error?: string }>;
   run: ReturnType<typeof createRun>;
   scan: ReturnType<typeof scanIssueText>;
@@ -148,7 +148,7 @@ interface PersistedWebhookRunRecord {
   };
 }
 
-export function createByterServer(options: ByterServerOptions = {}): Server {
+export function createPatchPilotServer(options: PatchPilotServerOptions = {}): Server {
   const staticDir = resolve(options.staticDir ?? process.env.STATIC_DIR ?? defaultStaticDir());
   const dataDir = options.dataDir ?? process.env.DATA_DIR;
   const databaseUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.PGDATABASE_URL;
@@ -227,7 +227,7 @@ async function handleGitHubWebhook(
   request: IncomingMessage,
   response: ServerResponse,
   dataDir: string | undefined,
-  trueForgeRuntime: ByterSessionStarter | undefined,
+  trueForgeRuntime: PatchPilotSessionStarter | undefined,
   githubClient: GitHubRestClientLike | undefined,
   activeIssueTriggers: Set<string>,
   postgresStore?: PostgresStore
@@ -310,7 +310,7 @@ async function processIssueWebhook(
   response: ServerResponse,
   dataDir: string | undefined,
   githubClient: GitHubRestClientLike | undefined,
-  trueForgeRuntime: ByterSessionStarter | undefined,
+  trueForgeRuntime: PatchPilotSessionStarter | undefined,
   activeIssueTriggers: Set<string>,
   isExplicitRetrigger = false,
   postgresStore?: PostgresStore
@@ -414,7 +414,7 @@ function parseGitHubApprovalCommand(body: string | null): GitHubApprovalCommand 
   if (body?.trim().toLowerCase() === "approve") {
     return {};
   }
-  const match = body?.trim().match(/^\/byter\s+approve\s+(\S+)\s+([a-f0-9]{64})$/i);
+  const match = body?.trim().match(/^\/patchpilot\s+approve\s+(\S+)\s+([a-f0-9]{64})$/i);
   return match ? { runId: match[1], patchHash: match[2].toLowerCase() } : undefined;
 }
 
@@ -430,7 +430,7 @@ async function handleGitHubIssueCommentWebhook(
   response: ServerResponse,
   dataDir: string | undefined,
   githubClient: GitHubRestClientLike | undefined,
-  trueForgeRuntime: ByterSessionStarter | undefined,
+  trueForgeRuntime: PatchPilotSessionStarter | undefined,
   activeIssueTriggers: Set<string>,
   postgresStore?: PostgresStore
 ): Promise<void> {
@@ -446,12 +446,12 @@ async function handleGitHubIssueCommentWebhook(
     return;
   }
 
-  if (/(^|\n)\/byter\s+run(?:\s|$)/i.test(webhook.comment.body ?? "")) {
+  if (/(^|\n)\/patchpilot\s+run(?:\s|$)/i.test(webhook.comment.body ?? "")) {
     const issueWebhook: ReturnType<typeof parseIssueWebhook> = {
       action: "opened",
       issue: {
         ...webhook.issue,
-        body: webhook.issue.body ? `${webhook.issue.body}\n\n/byter run` : "/byter run"
+        body: webhook.issue.body ? `${webhook.issue.body}\n\n/patchpilot run` : "/patchpilot run"
       },
       repository: webhook.repository
     };
@@ -462,7 +462,7 @@ async function handleGitHubIssueCommentWebhook(
 
   const command = parseGitHubApprovalCommand(webhook.comment.body);
   if (!command) {
-    sendJson(response, 202, { ignored: true, reason: "No Byter approval command" });
+    sendJson(response, 202, { ignored: true, reason: "No PatchPilot approval command" });
     return;
   }
 
@@ -527,7 +527,7 @@ async function handleLatestRun(
   request: IncomingMessage,
   response: ServerResponse,
   dataDir: string | undefined,
-  trueForgeRuntime: ByterSessionStarter | undefined,
+  trueForgeRuntime: PatchPilotSessionStarter | undefined,
   postgresStore?: PostgresStore
 ): Promise<void> {
   if (request.method !== "GET") {
@@ -561,7 +561,7 @@ async function handleRun(
   response: ServerResponse,
   dataDir: string | undefined,
   runId: string,
-  trueForgeRuntime: ByterSessionStarter | undefined,
+  trueForgeRuntime: PatchPilotSessionStarter | undefined,
   postgresStore?: PostgresStore
 ): Promise<void> {
   if (request.method !== "GET") {
@@ -599,7 +599,7 @@ function publicRunPayload(value: unknown): unknown {
   const result = isRecord(trueForge.result)
     ? {
         ...trueForge.result,
-        ...(typeof trueForge.result.kind === "string" ? { kind: "byter.result" } : {}),
+        ...(typeof trueForge.result.kind === "string" ? { kind: "patchpilot.result" } : {}),
         ...(typeof trueForge.result.summary === "string" ? { summary: safePublicMarkdown(trueForge.result.summary) } : {}),
         ...(typeof trueForge.result.rootCauseSummary === "string" ? { rootCauseSummary: safePublicMarkdown(trueForge.result.rootCauseSummary) } : {}),
         ...(typeof trueForge.result.proposedFixSummary === "string" ? { proposedFixSummary: safePublicMarkdown(trueForge.result.proposedFixSummary) } : {}),
@@ -637,7 +637,7 @@ function publicRunPayload(value: unknown): unknown {
           ])
           ),
           id: `event-${index + 1}`,
-          source: publicEvent.source === "trueforge" ? "trueforge" : "byter",
+          source: publicEvent.source === "trueforge" ? "trueforge" : "patchpilot",
           ...(publicEvent.category === "session" ? { category: "agent" } : {}),
           ...(typeof publicEvent.type === "string"
             ? { type: publicEvent.type.replace(/session/gi, "run").replace(/turn/gi, "step") }
@@ -651,7 +651,7 @@ function publicRunPayload(value: unknown): unknown {
     : label;
   const lifecycleLabels = Array.isArray(value.lifecycleLabels)
     ? value.lifecycleLabels.map((label) => isRecord(label) && typeof label.name === "string"
-      ? { ...label, name: `byter:${label.name.split(":").at(-1)}` }
+      ? { ...label, name: `patchpilot:${label.name.split(":").at(-1)}` }
       : label)
     : value.lifecycleLabels;
 
@@ -661,8 +661,8 @@ function publicRunPayload(value: unknown): unknown {
     ...(typeof value.issueBody === "string" ? { issueBody: safePublicMarkdown(value.issueBody) } : {}),
     run: publicRun,
     trueForge: { ...trueForge, result, events },
-    verifiedLabel: normalizeLabel(value.verifiedLabel, "byter:verified"),
-    approvalLabel: normalizeLabel(value.approvalLabel, "byter:awaiting-approval"),
+    verifiedLabel: normalizeLabel(value.verifiedLabel, "patchpilot:verified"),
+    approvalLabel: normalizeLabel(value.approvalLabel, "patchpilot:awaiting-approval"),
     lifecycleLabels
   };
 }
@@ -681,12 +681,12 @@ function safePublicMarkdown(value: string): string {
 
 function normalizePublicBrandText(value: string): string {
   const legacyBrand = new RegExp(["repro", "smith"].join(""), "gi");
-  return value.replace(legacyBrand, "Byter");
+  return value.replace(legacyBrand, "PatchPilot");
 }
 
 function normalizePublicBranchName(value: string): string {
   const fixPrefix = value.indexOf("/fix-");
-  return fixPrefix >= 0 ? `byter${value.slice(fixPrefix)}` : value;
+  return fixPrefix >= 0 ? `patchpilot${value.slice(fixPrefix)}` : value;
 }
 
 function ensureDashboardUrl(value: unknown): unknown {
@@ -711,7 +711,7 @@ function decodeRunId(pathname: string): string {
 async function refreshLegacyHarnessTrace(
   dataDir: string | undefined,
   value: unknown,
-  trueForgeRuntime: ByterSessionStarter | undefined
+  trueForgeRuntime: PatchPilotSessionStarter | undefined
 ): Promise<unknown> {
   if (!dataDir || !trueForgeRuntime?.listSessionEvents || !isRecord(value) || !isRecord(value.trueForge)) {
     return value;
@@ -803,7 +803,7 @@ async function startTrueForgeSessionForIssue(
   webhook: ReturnType<typeof parseIssueWebhook>,
   deliveryId: string,
   safeToExecute: boolean,
-  trueForgeRuntime: ByterSessionStarter | undefined
+  trueForgeRuntime: PatchPilotSessionStarter | undefined
 ) {
   if (!safeToExecute) {
     return {
@@ -870,7 +870,7 @@ async function handleApproval(
   request: IncomingMessage,
   response: ServerResponse,
   dataDir: string | undefined,
-  trueForgeRuntime: ByterSessionStarter | undefined,
+  trueForgeRuntime: PatchPilotSessionStarter | undefined,
   githubClient: GitHubRestClientLike | undefined,
   postgresStore?: PostgresStore
 ): Promise<void> {
@@ -913,7 +913,7 @@ async function executeApproval(
   runId: string,
   actionId: ApprovalActionId,
   patchHash: string,
-  trueForgeRuntime: ByterSessionStarter | undefined,
+  trueForgeRuntime: PatchPilotSessionStarter | undefined,
   githubClient: GitHubRestClientLike | undefined,
   postgresStore?: PostgresStore
 ): Promise<ApprovalExecutionResult> {
@@ -997,7 +997,7 @@ async function executeApproval(
           at: receipt.savedAt,
           type: "approval.received",
           category: "approval",
-          source: "byter",
+          source: "patchpilot",
           status: actionId === "reject-run" ? "failed" : "passed",
           summary: actionId === "reject-run" ? "Maintainer rejected the candidate patch" : "Maintainer requested a diff review",
           artifact: actionId === "reject-run" ? "run stopped" : "write held"
@@ -1132,7 +1132,7 @@ async function executeApproval(
           at: new Date().toISOString(),
           type: "approval.received",
           category: "approval",
-          source: "byter",
+          source: "patchpilot",
           status: "passed",
           summary: "Maintainer approval resumed the TrueForge GitHub write",
           toolName: "create_fix_pull_request",
@@ -1232,20 +1232,20 @@ async function appendUpdatedLiveRecord(dataDir: string | undefined, record: Pers
 }
 
 const lifecycleLabelDefinitions = [
-  { name: "byter:triaging", color: "1d5fd1", description: "Byter is triaging this issue" },
-  { name: "byter:needs-info", color: "a85b00", description: "Byter needs more issue information" },
-  { name: "byter:not-reproduced", color: "6e7781", description: "Byter could not reproduce this issue" },
-  { name: "byter:security-review", color: "b42318", description: "Byter held this issue for security review" },
-  { name: "byter:pr-created", color: "1a7f37", description: "Byter created a draft pull request" }
+  { name: "patchpilot:triaging", color: "1d5fd1", description: "PatchPilot is triaging this issue" },
+  { name: "patchpilot:needs-info", color: "a85b00", description: "PatchPilot needs more issue information" },
+  { name: "patchpilot:not-reproduced", color: "6e7781", description: "PatchPilot could not reproduce this issue" },
+  { name: "patchpilot:security-review", color: "b42318", description: "PatchPilot held this issue for security review" },
+  { name: "patchpilot:pr-created", color: "1a7f37", description: "PatchPilot created a draft pull request" }
 ] as const;
 
 function desiredLifecycleLabels(record: PersistedWebhookRunRecord): string[] {
-  if (!record.scan.safeToExecute) return ["byter:security-review"];
-  if (record.run.status === "pr-created") return ["byter:pr-created"];
+  if (!record.scan.safeToExecute) return ["patchpilot:security-review"];
+  if (record.run.status === "pr-created") return ["patchpilot:pr-created"];
   if (record.run.status === "awaiting-approval") return [];
-  if (record.run.status === "needs-info") return ["byter:needs-info"];
-  if (record.run.status === "not-reproduced") return ["byter:not-reproduced"];
-  if (record.run.status === "triaging" || record.trueForge.status === "started") return ["byter:triaging"];
+  if (record.run.status === "needs-info") return ["patchpilot:needs-info"];
+  if (record.run.status === "not-reproduced") return ["patchpilot:not-reproduced"];
+  if (record.run.status === "triaging" || record.trueForge.status === "started") return ["patchpilot:triaging"];
   return [];
 }
 
@@ -1303,7 +1303,7 @@ async function applyVerifiedLabel(
     const owner = record.run.issue.owner;
     const repo = record.run.issue.repo;
     const issueNumber = record.run.issue.issueNumber;
-    const labelName = "byter:verified";
+    const labelName = "patchpilot:verified";
     const labelColor = "8250df";
     try {
       await githubClient.updateLabel?.(owner, repo, labelName, labelColor, "Issue verified by reproducible evidence");
@@ -1320,12 +1320,12 @@ async function applyVerifiedLabel(
     await githubClient.updateLabel?.(owner, repo, labelName, labelColor, "Issue verified by reproducible evidence");
     return {
       ...record,
-      verifiedLabel: { name: "byter:verified", appliedAt: new Date().toISOString() }
+      verifiedLabel: { name: "patchpilot:verified", appliedAt: new Date().toISOString() }
     };
   } catch {
     return {
       ...record,
-      verifiedLabel: { name: "byter:verified", error: "GitHub did not accept the verified label request" }
+      verifiedLabel: { name: "patchpilot:verified", error: "GitHub did not accept the verified label request" }
     };
   }
 }
@@ -1347,7 +1347,7 @@ async function applyAwaitingApprovalLabel(
     const owner = record.run.issue.owner;
     const repo = record.run.issue.repo;
     const issueNumber = record.run.issue.issueNumber;
-    const labelName = "byter:awaiting-approval";
+    const labelName = "patchpilot:awaiting-approval";
     const labelColor = "d1242f";
     try {
       await githubClient.updateLabel?.(owner, repo, labelName, labelColor, "Verified patch is waiting for maintainer approval");
@@ -1370,7 +1370,7 @@ async function applyAwaitingApprovalLabel(
     return {
       ...record,
       approvalLabel: {
-        name: "byter:awaiting-approval",
+        name: "patchpilot:awaiting-approval",
         error: "GitHub did not accept the approval label request"
       }
     };
@@ -1390,7 +1390,7 @@ async function removeAwaitingApprovalLabel(
       record.run.issue.owner,
       record.run.issue.repo,
       record.run.issue.issueNumber,
-      "byter:awaiting-approval"
+      "patchpilot:awaiting-approval"
     );
     return { ...record, approvalLabel: undefined };
   } catch {
@@ -1511,19 +1511,19 @@ export function buildGitHubStatusComment(record: PersistedWebhookRunRecord, kind
   const reviewUrl = record.dashboardUrl ? `${record.dashboardUrl.replace(/\/$/, "")}/review` : "#";
   const runUrl = record.dashboardUrl ?? "#";
   const lines = [
-    `<!-- byter-run:${record.run.id} -->`,
-    `## Byter · ${status.label}`,
+    `<!-- patchpilot-run:${record.run.id} -->`,
+    `## PatchPilot · ${status.label}`,
     "",
     `Issue #${record.run.issue.issueNumber}: ${safeCommentText(record.issueTitle, 240)}`,
     `**Status:** ${status.detail}`,
     "",
-    `[Open Byter run →](${record.dashboardUrl ?? "#"})`
+    `[Open PatchPilot run →](${record.dashboardUrl ?? "#"})`
   ];
 
   if (!record.scan.safeToExecute || record.run.status === "security-review") {
     lines.push(
       "",
-      "Byter detected potentially unsafe reproduction instructions and held execution.",
+      "PatchPilot detected potentially unsafe reproduction instructions and held execution.",
       "",
       "**Execution:** Blocked",
       "**GitHub writes:** None",
@@ -1533,7 +1533,7 @@ export function buildGitHubStatusComment(record: PersistedWebhookRunRecord, kind
   } else if (record.run.status === "needs-info") {
     lines.push(
       "",
-      "Byter could not build a reliable reproduction from the current report.",
+      "PatchPilot could not build a reliable reproduction from the current report.",
       "",
       "**Next step:** Add the missing runtime, input, or expected-output details and trigger a new run.",
       "",
@@ -1542,7 +1542,7 @@ export function buildGitHubStatusComment(record: PersistedWebhookRunRecord, kind
   } else if (record.run.status === "not-reproduced") {
     lines.push(
       "",
-      "Byter built the reported environment but did not observe the claimed failure.",
+      "PatchPilot built the reported environment but did not observe the claimed failure.",
       "",
       `**Reproduction attempts:** ${safeCommentText(result?.proof?.attempts ?? "No matching failure observed", 180)}`,
       "",
@@ -1588,7 +1588,7 @@ export function buildGitHubStatusComment(record: PersistedWebhookRunRecord, kind
       "### Finding",
       safeCommentMarkdown(result.rootCauseSummary ?? summarizeCommentText(result.summary), 360),
       "",
-      "No candidate patch was returned, so Byter did not request repository write approval.",
+      "No candidate patch was returned, so PatchPilot did not request repository write approval.",
       `**[View verification evidence →](${runUrl})**`
     );
   } else if (record.run.status === "failed") {
@@ -1695,7 +1695,7 @@ function githubCommentStatus(record: PersistedWebhookRunRecord): { label: string
     return { label: "Fix proposed", detail: "Approved patch validated; draft pull request created." };
   }
   if (record.run.status === "needs-info") {
-    return { label: "Needs information", detail: "The issue needs more detail before Byter can reproduce it." };
+    return { label: "Needs information", detail: "The issue needs more detail before PatchPilot can reproduce it." };
   }
   if (record.run.status === "not-reproduced") {
     return { label: "Not reproduced", detail: "The reported failure was not observed in the investigated environment." };
@@ -1721,7 +1721,7 @@ function githubCommentStatus(record: PersistedWebhookRunRecord): { label: string
     }
     return { label: "Investigating", detail: "TrueForge is inspecting the issue and collecting executable evidence." };
   }
-  return { label: "Investigation queued", detail: "Byter accepted the signed issue and is preparing the investigation." };
+  return { label: "Investigation queued", detail: "PatchPilot accepted the signed issue and is preparing the investigation." };
 }
 
 async function findPersistedRunById(
@@ -2300,7 +2300,7 @@ function findTrueForgeToolCall(
 }
 
 interface ReconcileSessionEventsOptions {
-  trueForgeRuntime: ByterSessionStarter;
+  trueForgeRuntime: PatchPilotSessionStarter;
   sessionId: string;
   turnId?: string;
   persistTraceEvent?: TrueForgeRuntimeEventListener;
@@ -2389,7 +2389,7 @@ function runtimeEventKey(event: TrueForgeRuntimeEvent): string {
 async function monitorTrueForgeTurn(
   dataDir: string | undefined,
   record: PersistedWebhookRunRecord,
-  trueForgeRuntime: ByterSessionStarter,
+  trueForgeRuntime: PatchPilotSessionStarter,
   githubClient: GitHubRestClientLike | undefined,
   postgresStore?: PostgresStore
 ): Promise<void> {
@@ -2519,7 +2519,7 @@ async function monitorTrueForgeTurn(
           ? "TrueForge returned a patch without a matching native approval checkpoint"
           : turnError
             ? `TrueForge turn failed: ${turnError}`
-            : "TrueForge completed without a valid byter.result contract"
+            : "TrueForge completed without a valid patchpilot.result contract"
       );
     }
     const completedRecord: PersistedWebhookRunRecord = {
@@ -2537,7 +2537,7 @@ async function monitorTrueForgeTurn(
                   ? "TrueForge patch did not match a native approval checkpoint"
                   : turnError
                     ? `TrueForge turn failed: ${turnError}`
-                    : "TrueForge completed without a valid byter.result contract" }
+                    : "TrueForge completed without a valid patchpilot.result contract" }
           : { error: "TrueForge turn is still running; completion has not been observed" }),
         events: eventMetadata,
         ...(pendingApproval ? { pendingApproval } : {}),
@@ -2607,7 +2607,7 @@ function projectTrueForgeEvent(event: TrueForgeRuntimeEvent, fallbackIndex = 0):
         ...(typeof args.issueNumber === "number" ? { target: `issue #${args.issueNumber}` } : {}),
         ...(typeof args.command === "string" ? { command: redactHarnessText(args.command) } : {}),
         ...(typeof args.sandboxId === "string" ? { sandboxId: args.sandboxId } : {}),
-        ...(category === "mcp" ? { mcpServer: "byter-github" } : {}),
+        ...(category === "mcp" ? { mcpServer: "patchpilot-github" } : {}),
         ...(category === "subagent" ? { subagent: typeof args.name === "string" ? args.name : name } : {})
       }];
     });
@@ -2696,7 +2696,7 @@ function mergeHarnessEvents(existing: HarnessTraceEvent[], incoming: HarnessTrac
 
 function categoryForTool(name: string): HarnessEventCategory {
   if (name === "exec" || name === "shell" || name === "run_command") return "sandbox";
-  if (name === "read_issue" || name === "read_file" || name === "submit_byter_result" || name === "add_verified_label" || name === "comment_on_issue") return "mcp";
+  if (name === "read_issue" || name === "read_file" || name === "submit_patchpilot_result" || name === "add_verified_label" || name === "comment_on_issue") return "mcp";
   if (name.endsWith("create_fix_pull_request")) return "github";
   if (name.includes("subagent") || name.includes("delegate") || name === "task") return "subagent";
   return "agent";
@@ -2706,7 +2706,7 @@ function summaryForTool(name: string, args: Record<string, unknown>): string {
   if (name === "exec" || name === "shell" || name === "run_command") return "Running a command in the Daytona sandbox";
   if (name === "read_file") return `Reading ${typeof args.path === "string" ? redactHarnessText(args.path) : "a repository file"} through GitHub MCP`;
   if (name === "read_issue") return `Reading ${typeof args.issueNumber === "number" ? `issue #${args.issueNumber}` : "the GitHub issue"} through GitHub MCP`;
-  if (name === "submit_byter_result") return "Submitting the Byter proof contract";
+  if (name === "submit_patchpilot_result") return "Submitting the PatchPilot proof contract";
   if (name.endsWith("create_fix_pull_request")) return "Preparing the GitHub pull request write for approval";
   if (categoryForTool(name) === "subagent") return `Delegating ${typeof args.name === "string" ? args.name : "a focused task"}`;
   return `Calling ${name}`;
@@ -2781,7 +2781,7 @@ function redactHarnessText(value: string): string {
 }
 
 function extractLiveProofResult(events: TrueForgeRuntimeEvent[], record: PersistedWebhookRunRecord): LiveProofResult | undefined {
-  const submittedResult = extractSubmittedByterResult(events);
+  const submittedResult = extractSubmittedPatchPilotResult(events);
   const doneEvents = events.filter((event) => event.type === "turn.done").reverse();
   const streamedDeltaText = joinBoundedTexts(
     events
@@ -2807,7 +2807,7 @@ function extractLiveProofResult(events: TrueForgeRuntimeEvent[], record: Persist
       outputCount: outputTexts.length,
       outputLengths: outputTexts.map((output) => output.length),
       joinedLength: joinedOutput.length,
-      hasResultMarker: joinedOutput.includes("byter.result"),
+      hasResultMarker: joinedOutput.includes("patchpilot.result"),
       hasCandidatePatch: joinedOutput.includes("candidatePatch"),
       hasKnownStatus: /\"status\"\s*:\s*\"(?:patch-ready|verified|not-reproduced|blocked|failed)\"/.test(joinedOutput),
       hasJsonObject: joinedOutput.includes("{")
@@ -2825,7 +2825,7 @@ function extractLiveProofResult(events: TrueForgeRuntimeEvent[], record: Persist
     return undefined;
   }
   if ((status === "patch-ready" || status === "verified") && !submittedResult) {
-    console.error("TrueForge positive proof was not submitted through submit_byter_result");
+    console.error("TrueForge positive proof was not submitted through submit_patchpilot_result");
     return undefined;
   }
 
@@ -2862,7 +2862,7 @@ function extractLiveProofResult(events: TrueForgeRuntimeEvent[], record: Persist
   };
 }
 
-function extractSubmittedByterResult(events: TrueForgeRuntimeEvent[]): Record<string, unknown> | undefined {
+function extractSubmittedPatchPilotResult(events: TrueForgeRuntimeEvent[]): Record<string, unknown> | undefined {
   for (const event of [...events].reverse()) {
     if (event.type !== "model.message") continue;
     const raw = unwrapRuntimeEvent(event.raw);
@@ -2870,9 +2870,9 @@ function extractSubmittedByterResult(events: TrueForgeRuntimeEvent[]): Record<st
     const toolCalls = Array.isArray(raw.toolCalls) ? raw.toolCalls : Array.isArray(raw.tool_calls) ? raw.tool_calls : [];
     for (const toolCall of [...toolCalls].reverse()) {
       if (!isRecord(toolCall) || !isRecord(toolCall.function)) continue;
-      if (typeof toolCall.function.name !== "string" || !toolCall.function.name.endsWith("submit_byter_result")) continue;
+      if (typeof toolCall.function.name !== "string" || !toolCall.function.name.endsWith("submit_patchpilot_result")) continue;
       const submitted = parseToolArguments(toolCall.function.arguments);
-      if (isByterResultContract(submitted)) return submitted;
+      if (isPatchPilotResultContract(submitted)) return submitted;
     }
   }
   return undefined;
@@ -3014,7 +3014,7 @@ function normalizeCandidatePatch(value: unknown, record: PersistedWebhookRunReco
 }
 
 function branchNameForIssue(issueNumber: number, deliveryId: string): string {
-  return `byter/fix-${issueNumber}-${createHash("sha256").update(deliveryId).digest("hex").slice(0, 10)}`;
+  return `patchpilot/fix-${issueNumber}-${createHash("sha256").update(deliveryId).digest("hex").slice(0, 10)}`;
 }
 
 function applyLiveProofResult(run: ReturnType<typeof createRun>, result: LiveProofResult) {
@@ -3072,7 +3072,7 @@ function contentText(value: unknown): string {
     if ("output" in value) return contentText(value.output);
     if ("delta" in value) return contentText(value.delta);
     if (isRecord(value.function) && typeof value.function.arguments === "string") return value.function.arguments;
-    if (value.kind === "byter.result" || isRecord(value.candidatePatch) || isCandidatePatchObject(value)) {
+    if (value.kind === "patchpilot.result" || isRecord(value.candidatePatch) || isCandidatePatchObject(value)) {
       return JSON.stringify(value);
     }
     return "";
@@ -3099,7 +3099,7 @@ function parseResultJson(text: string): Record<string, unknown> | undefined {
     try {
       const parsed = JSON.parse(candidate.trim()) as unknown;
       if (!isRecord(parsed)) continue;
-      if (isByterResultContract(parsed)) return parsed;
+      if (isPatchPilotResultContract(parsed)) return parsed;
     } catch {
       // Try the next bounded candidate.
     }
@@ -3142,10 +3142,10 @@ function isCandidatePatchObject(value: Record<string, unknown>): boolean {
   return typeof value.title === "string" && typeof value.body === "string" && Array.isArray(value.files);
 }
 
-function isByterResultContract(value: Record<string, unknown>): boolean {
+function isPatchPilotResultContract(value: Record<string, unknown>): boolean {
   const proof = isRecord(value.proof) ? value.proof : undefined;
   if (
-    value.kind !== "byter.result" ||
+    value.kind !== "patchpilot.result" ||
     !parseLiveResultStatus(value.status) ||
     typeof value.summary !== "string" ||
     !proof ||
@@ -3193,11 +3193,11 @@ function dashboardUrlFor(runId: string): string {
 }
 
 function requiresExplicitTrigger(): boolean {
-  return process.env.BYTER_REQUIRE_TRIGGER_LABEL === "true";
+  return process.env.PATCHPILOT_REQUIRE_TRIGGER_LABEL === "true";
 }
 
 function triggerLabel(): string {
-  return process.env.BYTER_TRIGGER_LABEL?.trim() || "byter:run";
+  return process.env.PATCHPILOT_TRIGGER_LABEL?.trim() || "patchpilot:run";
 }
 
 function hasTriggerLabel(webhook: ReturnType<typeof parseIssueWebhook>): boolean {
@@ -3209,7 +3209,7 @@ function hasTriggerLabel(webhook: ReturnType<typeof parseIssueWebhook>): boolean
 }
 
 function hasExplicitTrigger(webhook: ReturnType<typeof parseIssueWebhook>): boolean {
-  if (/(^|\n)\/byter\s+run(?:\s|$)/i.test(webhook.issue.body ?? "")) {
+  if (/(^|\n)\/patchpilot\s+run(?:\s|$)/i.test(webhook.issue.body ?? "")) {
     return true;
   }
   return hasTriggerLabel(webhook);
@@ -3288,7 +3288,7 @@ function githubMcpHandlerFromEnv(githubClient: GitHubRestClientLike | undefined)
   });
 }
 
-function trueForgeRuntimeFromEnv(githubClient: GitHubRestClientLike | undefined): ByterSessionStarter | undefined {
+function trueForgeRuntimeFromEnv(githubClient: GitHubRestClientLike | undefined): PatchPilotSessionStarter | undefined {
   const model = modelClientFromEnv();
   if (!model || !githubClient) {
     return undefined;

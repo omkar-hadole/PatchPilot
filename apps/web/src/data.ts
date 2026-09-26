@@ -1,4 +1,4 @@
-import type { ReproRun, RunStatus, SecurityScanResult } from "@byter/core";
+import type { ReproRun, RunStatus, SecurityScanResult } from "@patchpilot/core";
 
 export type EvidenceKind = "stdout" | "stack" | "patch" | "policy";
 export type ApprovalActionId = "approve-pr" | "request-diff" | "reject-run";
@@ -34,7 +34,7 @@ export interface HarnessTraceEvent {
   at: string;
   type: string;
   category: HarnessEventCategory;
-  source: "trueforge" | "byter";
+  source: "trueforge" | "patchpilot";
   status: "info" | "running" | "passed" | "failed";
   summary: string;
   toolName?: string;
@@ -109,8 +109,8 @@ interface WebhookRunRecord {
   dashboardUrl?: string;
   githubStatusComment?: { id?: number; url: string };
   githubComments?: Array<{ id?: number; url: string; kind: "started" | "completed" | "failed" | "approval"; createdAt: string }>;
-  verifiedLabel?: { name: "byter:verified"; appliedAt?: string; error?: string };
-  approvalLabel?: { name: "byter:awaiting-approval"; appliedAt?: string; error?: string };
+  verifiedLabel?: { name: "patchpilot:verified"; appliedAt?: string; error?: string };
+  approvalLabel?: { name: "patchpilot:awaiting-approval"; appliedAt?: string; error?: string };
   run: ReproRun;
   scan: SecurityScanResult;
   trueForge?: {
@@ -145,7 +145,7 @@ interface WebhookRunRecord {
 }
 
 export function apiUrl(path: string): string {
-  const baseUrl = (import.meta.env.VITE_BYTER_API_URL ?? "").trim().replace(/\/+$/, "");
+  const baseUrl = (import.meta.env.VITE_PATCHPILOT_API_URL ?? "").trim().replace(/\/+$/, "");
   return `${baseUrl}${path}`;
 }
 

@@ -8,7 +8,7 @@
     "moduleResolution": "Bundler",
     "noEmit": true,
     "paths": {
-      "@byter/core": ["../../packages/core/src/index.js"]
+      "@patchpilot/core": ["../../packages/core/src/index.js"]
     },
     "sourceMap": false,
     "types": ["vite/client"]

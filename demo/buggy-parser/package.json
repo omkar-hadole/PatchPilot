@@ -1,5 +1,5 @@
 {
-  "name": "@byter/buggy-parser",
+  "name": "@patchpilot/buggy-parser",
   "version": "0.1.0",
   "private": true,
   "type": "module",

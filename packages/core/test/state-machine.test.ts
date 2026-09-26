@@ -3,12 +3,12 @@ import { createRun, transitionRun } from "../src/index.js";
 
 const issue = {
   owner: "MAYANK-MAHAUR",
-  repo: "Byter",
+  repo: "PatchPilot",
   issueNumber: 1,
-  url: "https://github.com/MAYANK-MAHAUR/Byter/issues/1"
+  url: "https://github.com/MAYANK-MAHAUR/PatchPilot/issues/1"
 };
 
-describe("Byter state machine", () => {
+describe("PatchPilot state machine", () => {
   it("records a received issue and valid next event", () => {
     const run = createRun("run_1", issue, new Date("2026-08-27T10:00:00.000Z"));
     const next = transitionRun(run, "security-review", "Scanning issue text");
@@ -22,7 +22,7 @@ describe("Byter state machine", () => {
     const run = createRun("run_1", issue);
 
     expect(() => transitionRun(run, "verified", "Trust me")).toThrow(
-      "Invalid Byter transition: received -> verified"
+      "Invalid PatchPilot transition: received -> verified"
     );
   });
 
@@ -41,7 +41,7 @@ describe("Byter state machine", () => {
     const failed = transitionRun(createRun("run_1", issue), "failed", "Unexpected worker failure");
 
     expect(() => transitionRun(failed, "triaging", "Try again")).toThrow(
-      "Invalid Byter transition: failed -> triaging"
+      "Invalid PatchPilot transition: failed -> triaging"
     );
   });
 });

@@ -57,7 +57,7 @@ export class GitHubRestClient {
   constructor(options: GitHubClientOptions) {
     this.token = options.token;
     this.apiBaseUrl = (options.apiBaseUrl ?? "https://api.github.com").replace(/\/+$/, "");
-    this.userAgent = options.userAgent ?? "Byter/0.1.0";
+    this.userAgent = options.userAgent ?? "PatchPilot/0.1.0";
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
 

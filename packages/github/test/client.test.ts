@@ -23,7 +23,7 @@ describe("GitHubRestClient", () => {
     expect(calls[0]?.url).toBe(
       "https://api.github.test/repos/owner-name/repo.name/contents/src/file%20name%3F%23.ts?ref=main"
     );
-    expect((calls[0]?.init.headers as Record<string, string>)["User-Agent"]).toBe("Byter/0.1.0");
+    expect((calls[0]?.init.headers as Record<string, string>)["User-Agent"]).toBe("PatchPilot/0.1.0");
     expect((calls[0]?.init.headers as Record<string, string>).Authorization).toBe("Bearer token");
   });
 
@@ -104,15 +104,15 @@ describe("GitHubRestClient", () => {
       files: [{ path: "src/tokenizer.ts", content: "export const fixed = true;\n" }]
     });
     const commit = await client.createCommit("owner", "repo", {
-      message: "Byter fix: trailing escape",
+      message: "PatchPilot fix: trailing escape",
       tree: tree.sha,
       parents: [branch.commit.sha]
     });
-    await client.createBranch("owner", "repo", "byter/fix-17", commit.sha);
+    await client.createBranch("owner", "repo", "patchpilot/fix-17", commit.sha);
     const pullRequest = await client.createPullRequest("owner", "repo", {
       title: "Fix trailing escape",
-      body: "Verified by Byter.",
-      head: "byter/fix-17",
+      body: "Verified by PatchPilot.",
+      head: "patchpilot/fix-17",
       base: "main"
     });
 
@@ -133,7 +133,7 @@ describe("GitHubRestClient", () => {
       parents: ["a".repeat(40)]
     });
     expect(JSON.parse(calls[4]?.init.body as string)).toMatchObject({
-      ref: "refs/heads/byter/fix-17",
+      ref: "refs/heads/patchpilot/fix-17",
       sha: "d".repeat(40)
     });
     expect(JSON.parse(calls[5]?.init.body as string)).toMatchObject({ draft: true });
@@ -148,9 +148,9 @@ describe("GitHubRestClient", () => {
     }) as typeof fetch;
     const client = new GitHubRestClient({ token: "token", apiBaseUrl: "https://api.github.test", fetchImpl });
 
-    await client.deleteBranch("owner", "repo", "byter/fix-17");
+    await client.deleteBranch("owner", "repo", "patchpilot/fix-17");
 
-    expect(calls[0]?.url).toBe("https://api.github.test/repos/owner/repo/git/refs/heads/byter/fix-17");
+    expect(calls[0]?.url).toBe("https://api.github.test/repos/owner/repo/git/refs/heads/patchpilot/fix-17");
     expect(calls[0]?.init.method).toBe("DELETE");
   });
 
@@ -162,12 +162,12 @@ describe("GitHubRestClient", () => {
     }) as typeof fetch;
     const client = new GitHubRestClient({ token: "token", apiBaseUrl: "https://api.github.test", fetchImpl });
 
-    await client.createLabel("owner", "repo", "byter:verified", "8250df", "Issue verified by reproducible evidence");
+    await client.createLabel("owner", "repo", "patchpilot:verified", "8250df", "Issue verified by reproducible evidence");
 
     expect(calls[0]?.url).toBe("https://api.github.test/repos/owner/repo/labels");
     expect(calls[0]?.init.method).toBe("POST");
     expect(JSON.parse(calls[0]?.init.body as string)).toEqual({
-      name: "byter:verified",
+      name: "patchpilot:verified",
       color: "8250df",
       description: "Issue verified by reproducible evidence"
     });
@@ -182,10 +182,10 @@ describe("GitHubRestClient", () => {
     const client = new GitHubRestClient({ token: "token", apiBaseUrl: "https://api.github.test", fetchImpl });
 
     await expect(client.getCollaboratorPermission("owner", "repo", "maintainer-name")).resolves.toEqual({ permission: "maintain" });
-    await client.removeLabel("owner", "repo", 17, "byter:awaiting-approval");
+    await client.removeLabel("owner", "repo", 17, "patchpilot:awaiting-approval");
 
     expect(calls[0]?.url).toBe("https://api.github.test/repos/owner/repo/collaborators/maintainer-name/permission");
-    expect(calls[1]?.url).toBe("https://api.github.test/repos/owner/repo/issues/17/labels/byter%3Aawaiting-approval");
+    expect(calls[1]?.url).toBe("https://api.github.test/repos/owner/repo/issues/17/labels/patchpilot%3Aawaiting-approval");
     expect(calls[1]?.init.method).toBe("DELETE");
   });
 });

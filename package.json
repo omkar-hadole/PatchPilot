@@ -1,5 +1,5 @@
 {
-  "name": "byter",
+  "name": "patchpilot",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -10,17 +10,17 @@
   "packageManager": "pnpm@10.0.0",
   "scripts": {
     "build": "pnpm -r --workspace-concurrency=1 build",
-    "dev": "pnpm --filter @byter/web dev",
+    "dev": "pnpm --filter @patchpilot/web dev",
     "lint": "pnpm -r --workspace-concurrency=1 lint",
     "test": "pnpm -r --workspace-concurrency=1 test",
     "typecheck": "pnpm -r --workspace-concurrency=1 typecheck",
-    "start": "pnpm --filter @byter/server start",
+    "start": "pnpm --filter @patchpilot/server start",
     "verify": "pnpm build && pnpm lint && pnpm typecheck && pnpm test",
     "smoke-test": "node --experimental-strip-types scripts/smoke-test.ts"
   },
   "dependencies": {
-    "@byter/agent": "workspace:*",
-    "@byter/github": "workspace:*"
+    "@patchpilot/agent": "workspace:*",
+    "@patchpilot/github": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

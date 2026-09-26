@@ -6,7 +6,7 @@ describe("GitHub MCP tools", () => {
     expect(listGitHubTools()).toEqual([
       expect.objectContaining({ name: "read_issue", requiresApproval: false }),
       expect.objectContaining({ name: "read_file", requiresApproval: false }),
-      expect.objectContaining({ name: "submit_byter_result", requiresApproval: false }),
+      expect.objectContaining({ name: "submit_patchpilot_result", requiresApproval: false }),
       expect.objectContaining({ name: "add_verified_label", requiresApproval: true }),
       expect.objectContaining({ name: "comment_on_issue", requiresApproval: true }),
       expect.objectContaining({ name: "create_fix_pull_request", requiresApproval: true })
@@ -80,9 +80,9 @@ describe("GitHub MCP tools", () => {
     const tools = createGitHubMcpTools({ client: client as never });
 
     const result = await tools.callTool({
-      name: "submit_byter_result",
+      name: "submit_patchpilot_result",
       arguments: {
-        kind: "byter.result",
+        kind: "patchpilot.result",
         status: "blocked",
         summary: "The sandbox runtime was unavailable.",
         proof: { before: "not run", after: "not run", regressions: "not run", attempts: "0/3" },
@@ -99,9 +99,9 @@ describe("GitHub MCP tools", () => {
     const tools = createGitHubMcpTools({ client: {} as never });
 
     await expect(tools.callTool({
-      name: "submit_byter_result",
+      name: "submit_patchpilot_result",
       arguments: {
-        kind: "byter.result",
+        kind: "patchpilot.result",
         status: "patch-ready",
         summary: "...",
         proof: { before: "...", after: "...", regressions: "...", attempts: "3/3" },
@@ -174,7 +174,7 @@ describe("GitHub MCP tools", () => {
       approval: { approved: true, expectedPayloadHash: approvalPayloadHash("add_verified_label", args) }
     });
 
-    expect(client.addLabels).toHaveBeenCalledWith("o", "r", 3, ["byter:verified"]);
+    expect(client.addLabels).toHaveBeenCalledWith("o", "r", 3, ["patchpilot:verified"]);
   });
 
   it("creates a draft fix pull request only with matching approval", async () => {
@@ -192,9 +192,9 @@ describe("GitHub MCP tools", () => {
       owner: "o",
       repo: "r",
       baseBranch: "main",
-      branchName: "byter/fix-9",
+      branchName: "patchpilot/fix-9",
       title: "Fix parser crash",
-      body: "Verified by Byter.",
+      body: "Verified by PatchPilot.",
       files: [{ path: "src/parser.ts", content: "export const fixed = true;\n" }]
     };
 
@@ -219,11 +219,11 @@ describe("GitHub MCP tools", () => {
       "r",
       expect.objectContaining({ tree: "c".repeat(40), parents: ["a".repeat(40)] })
     );
-    expect(client.createBranch).toHaveBeenCalledWith("o", "r", "byter/fix-9", "d".repeat(40));
+    expect(client.createBranch).toHaveBeenCalledWith("o", "r", "patchpilot/fix-9", "d".repeat(40));
     expect(client.createPullRequest).toHaveBeenCalledWith(
       "o",
       "r",
-      expect.objectContaining({ draft: true, head: "byter/fix-9" })
+      expect.objectContaining({ draft: true, head: "patchpilot/fix-9" })
     );
     expect(client.deleteBranch).not.toHaveBeenCalled();
     expect(result.content[0]?.text).toContain("https://github.test/pull/9");
@@ -244,9 +244,9 @@ describe("GitHub MCP tools", () => {
       owner: "o",
       repo: "r",
       baseBranch: "main",
-      branchName: "byter/fix-9",
+      branchName: "patchpilot/fix-9",
       title: "Fix parser crash",
-      body: "Verified by Byter.",
+      body: "Verified by PatchPilot.",
       files: [{ path: "src/parser.ts", content: "export const fixed = true;\n" }]
     };
 
@@ -258,6 +258,6 @@ describe("GitHub MCP tools", () => {
       })
     ).rejects.toThrow("pull request failed");
 
-    expect(client.deleteBranch).toHaveBeenCalledWith("o", "r", "byter/fix-9");
+    expect(client.deleteBranch).toHaveBeenCalledWith("o", "r", "patchpilot/fix-9");
   });
 });

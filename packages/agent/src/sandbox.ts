@@ -74,18 +74,48 @@ function execInWorkspace(
 ): Promise<SandboxExecutionResult> {
   return new Promise((resolvePromise) => {
     const startedAt = Date.now();
+    const isUnix = process.platform !== "win32";
     const child = spawn("bash", ["-c", command], {
       cwd,
-      env: { ...process.env, PATH: `${process.env.PATH ?? ""}` }
+      env: { ...process.env, PATH: `${process.env.PATH ?? ""}` },
+      detached: isUnix
     });
 
     let stdout = "";
     let stderr = "";
     let timedOut = false;
+    let settled = false;
 
+    const finish = (result: SandboxExecutionResult) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearTimeout(fallbackTimer);
+      resolvePromise(result);
+    };
+
+    let fallbackTimer: NodeJS.Timeout | undefined;
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGKILL");
+      try {
+        if (isUnix && child.pid) {
+          process.kill(-child.pid, "SIGKILL");
+        } else {
+          child.kill("SIGKILL");
+        }
+      } catch {
+        child.kill("SIGKILL");
+      }
+      fallbackTimer = setTimeout(() => {
+        finish({
+          command,
+          exitCode: null,
+          stdout: stdout.slice(0, maxOutputBytes),
+          stderr: `${stderr}\nExecution timed out after ${timeoutMs}ms`.slice(0, maxOutputBytes),
+          timedOut: true,
+          durationMs: Date.now() - startedAt
+        });
+      }, 1000);
     }, timeoutMs);
 
     child.stdout.on("data", (chunk: Buffer) => {
@@ -96,8 +126,7 @@ function execInWorkspace(
     });
 
     child.on("close", (exitCode) => {
-      clearTimeout(timer);
-      resolvePromise({
+      finish({
         command,
         exitCode,
         stdout: stdout.slice(0, maxOutputBytes),
@@ -108,8 +137,7 @@ function execInWorkspace(
     });
 
     child.on("error", (error) => {
-      clearTimeout(timer);
-      resolvePromise({
+      finish({
         command,
         exitCode: null,
         stdout,

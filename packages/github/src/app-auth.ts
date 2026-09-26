@@ -50,7 +50,7 @@ export async function createInstallationAccessToken(
         Accept: "application/vnd.github+json",
         Authorization: `Bearer ${jwt}`,
         "Content-Type": "application/json",
-        "User-Agent": "Byter/0.1.0",
+        "User-Agent": "PatchPilot/0.1.0",
         "X-GitHub-Api-Version": "2022-11-28"
       }
     }

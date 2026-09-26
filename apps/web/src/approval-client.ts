@@ -1,4 +1,4 @@
-import type { RunStatus } from "@byter/core";
+import type { RunStatus } from "@patchpilot/core";
 import { apiUrl, type ApprovalActionId } from "./data";
 
 export interface ApprovalSubmission {
@@ -11,7 +11,7 @@ export interface ApprovalSubmission {
   pullRequest?: { number: number; url: string };
 }
 
-const storagePrefix = "byter:approval:";
+const storagePrefix = "patchpilot:approval:";
 
 export async function submitApprovalAction(input: {
   runId: string;
@@ -36,10 +36,10 @@ export async function submitApprovalAction(input: {
 }
 
 function approvalAuthHeader(): Record<string, string> {
-  const storedToken = window.localStorage.getItem("byter:approval-token");
+  const storedToken = window.localStorage.getItem("patchpilot:approval-token");
   const token = storedToken ?? window.prompt("Approval token") ?? "";
   if (token && !storedToken) {
-    window.localStorage.setItem("byter:approval-token", token);
+    window.localStorage.setItem("patchpilot:approval-token", token);
   }
 
   return token ? { Authorization: `Bearer ${token}` } : {};

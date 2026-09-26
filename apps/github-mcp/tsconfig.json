@@ -6,7 +6,7 @@
     "outDir": "dist",
     "rootDir": "src",
     "paths": {
-      "@byter/github": ["../../packages/github/src/index.js"]
+      "@patchpilot/github": ["../../packages/github/src/index.js"]
     }
   },
   "references": [{ "path": "../../packages/github" }],

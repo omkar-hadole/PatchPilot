@@ -5,8 +5,8 @@ import { dirname, join } from "node:path";
 import { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createByterServer } from "../src/server.js";
-import { signWebhookPayload } from "@byter/github";
+import { createPatchPilotServer } from "../src/server.js";
+import { signWebhookPayload } from "@patchpilot/github";
 
 function executableProofEvents(prefix: string, sequenceNumber: number) {
   return [
@@ -35,12 +35,12 @@ function submittedResultEvent(prefix: string, sequenceNumber: number, result: st
     toolCalls: [{
       id: `${prefix}-result-call`,
       type: "function",
-      function: { name: "submit_byter_result", arguments: result }
+      function: { name: "submit_patchpilot_result", arguments: result }
     }]
   } } };
 }
 
-describe("Byter production server", () => {
+describe("PatchPilot production server", () => {
   let baseUrl: string;
   let closeServer: () => Promise<void>;
   let dataDir: string;
@@ -51,13 +51,13 @@ describe("Byter production server", () => {
     delete process.env.TRUEFORGE_URL;
     delete process.env.TRUEFORGE_API_KEY;
     delete process.env.MCP_AUTH_TOKEN;
-    delete process.env.BYTER_REQUIRE_TRIGGER_LABEL;
-    delete process.env.BYTER_TRIGGER_LABEL;
-    const staticDir = await mkdtemp(join(tmpdir(), "byter-static-"));
-    dataDir = await mkdtemp(join(tmpdir(), "byter-data-"));
-    await writeFile(join(staticDir, "index.html"), "<main>Byter</main>", "utf8");
+    delete process.env.PATCHPILOT_REQUIRE_TRIGGER_LABEL;
+    delete process.env.PATCHPILOT_TRIGGER_LABEL;
+    const staticDir = await mkdtemp(join(tmpdir(), "patchpilot-static-"));
+    dataDir = await mkdtemp(join(tmpdir(), "patchpilot-data-"));
+    await writeFile(join(staticDir, "index.html"), "<main>PatchPilot</main>", "utf8");
 
-    const server = createByterServer({ staticDir, dataDir });
+    const server = createPatchPilotServer({ staticDir, dataDir });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address() as AddressInfo;
     baseUrl = `http://127.0.0.1:${address.port}`;
@@ -70,21 +70,21 @@ describe("Byter production server", () => {
     delete process.env.TRUEFORGE_URL;
     delete process.env.TRUEFORGE_API_KEY;
     delete process.env.MCP_AUTH_TOKEN;
-    delete process.env.BYTER_REQUIRE_TRIGGER_LABEL;
-    delete process.env.BYTER_TRIGGER_LABEL;
+    delete process.env.PATCHPILOT_REQUIRE_TRIGGER_LABEL;
+    delete process.env.PATCHPILOT_TRIGGER_LABEL;
     await closeServer();
   });
 
   it("serves health and the built dashboard shell", async () => {
     await expect(fetch(`${baseUrl}/healthz`).then((response) => response.json())).resolves.toEqual({ ok: true });
-    await expect(fetch(baseUrl).then((response) => response.text())).resolves.toContain("Byter");
+    await expect(fetch(baseUrl).then((response) => response.text())).resolves.toContain("PatchPilot");
   });
 
   it("exposes the approval-gated GitHub write tool in production configuration", async () => {
     process.env.MCP_AUTH_TOKEN = "mcp-secret";
-    const staticDir = await mkdtemp(join(tmpdir(), "byter-static-"));
-    await writeFile(join(staticDir, "index.html"), "<main>Byter</main>", "utf8");
-    const server = createByterServer({ staticDir, githubClient: {} as any });
+    const staticDir = await mkdtemp(join(tmpdir(), "patchpilot-static-"));
+    await writeFile(join(staticDir, "index.html"), "<main>PatchPilot</main>", "utf8");
+    const server = createPatchPilotServer({ staticDir, githubClient: {} as any });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address() as AddressInfo;
 
@@ -169,13 +169,13 @@ describe("Byter production server", () => {
   });
 
   it("starts on a deliberate label event but ignores later edits with the standing label", async () => {
-    process.env.BYTER_REQUIRE_TRIGGER_LABEL = "true";
+    process.env.PATCHPILOT_REQUIRE_TRIGGER_LABEL = "true";
     const issue = {
       number: 18,
       title: "Parser crash",
       body: "Trailing escape crashes the parser.",
       html_url: "https://github.test/o/r/issues/18",
-      labels: [{ name: "byter:run" }]
+      labels: [{ name: "patchpilot:run" }]
     };
     const repository = { name: "r", full_name: "o/r", default_branch: "main", owner: { login: "o" } };
     const sendWebhook = async (action: string, deliveryId: string, labelName?: string) => {
@@ -197,7 +197,7 @@ describe("Byter production server", () => {
       });
     };
 
-    const labeledResponse = await sendWebhook("labeled", "delivery-label-18", "byter:run");
+    const labeledResponse = await sendWebhook("labeled", "delivery-label-18", "patchpilot:run");
     expect(labeledResponse.status).toBe(202);
     expect((await labeledResponse.json()).ignored).not.toBe(true);
 
@@ -205,25 +205,25 @@ describe("Byter production server", () => {
     expect(editedResponse.status).toBe(202);
     expect(await editedResponse.json()).toMatchObject({ ignored: true });
 
-    const lifecycleLabelResponse = await sendWebhook("labeled", "delivery-lifecycle-label-18", "byter:triaging");
+    const lifecycleLabelResponse = await sendWebhook("labeled", "delivery-lifecycle-label-18", "patchpilot:triaging");
     expect(lifecycleLabelResponse.status).toBe(202);
     expect(await lifecycleLabelResponse.json()).toMatchObject({ ignored: true });
   });
 
   it("deduplicates opened and labeled deliveries for the same issue trigger", async () => {
-    process.env.BYTER_REQUIRE_TRIGGER_LABEL = "true";
+    process.env.PATCHPILOT_REQUIRE_TRIGGER_LABEL = "true";
     const issue = {
       number: 19,
       title: "Parser loses escaped character case",
       body: "An escaped uppercase character is lowercased.",
       html_url: "https://github.test/o/r/issues/19",
-      labels: [{ name: "byter:run" }]
+      labels: [{ name: "patchpilot:run" }]
     };
     const repository = { name: "r", full_name: "o/r", default_branch: "main", owner: { login: "o" } };
     const sendWebhook = async (action: "opened" | "labeled", deliveryId: string) => {
       const payload = JSON.stringify({
         action,
-        ...(action === "labeled" ? { label: { name: "byter:run" } } : {}),
+        ...(action === "labeled" ? { label: { name: "patchpilot:run" } } : {}),
         issue,
         repository
       });
@@ -298,9 +298,9 @@ describe("Byter production server", () => {
   });
 
   it("surfaces a non-recoverable TrueForge provider error without retrying", async () => {
-    const staticDir = await mkdtemp(join(tmpdir(), "byter-static-"));
-    const liveDataDir = await mkdtemp(join(tmpdir(), "byter-data-"));
-    await writeFile(join(staticDir, "index.html"), "<main>Byter</main>", "utf8");
+    const staticDir = await mkdtemp(join(tmpdir(), "patchpilot-static-"));
+    const liveDataDir = await mkdtemp(join(tmpdir(), "patchpilot-data-"));
+    await writeFile(join(staticDir, "index.html"), "<main>PatchPilot</main>", "utf8");
     const trueForgeRuntime = {
       startSession: vi.fn().mockResolvedValue({
         session: { id: "session-live-1", title: null },
@@ -319,7 +319,7 @@ describe("Byter production server", () => {
       createIssueComment: vi.fn().mockResolvedValue({ id: 701, html_url: "https://github.test/issues/20#issuecomment-701" }),
       addLabels: vi.fn().mockResolvedValue(undefined)
     } as any;
-    const server = createByterServer({ staticDir, dataDir: liveDataDir, trueForgeRuntime, githubClient });
+    const server = createPatchPilotServer({ staticDir, dataDir: liveDataDir, trueForgeRuntime, githubClient });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address() as AddressInfo;
     const isolatedBaseUrl = `http://127.0.0.1:${address.port}`;
@@ -359,7 +359,7 @@ describe("Byter production server", () => {
         issueTitle: "Parser crash in production",
         issueBody: "Trailing escape crashes the parser.",
         baseBranch: "main",
-        branchName: "byter/fix-20-866c2789a3"
+        branchName: "patchpilot/fix-20-866c2789a3"
       });
       expect(body.run.status).toBe("environment-building");
       expect(body.trueForge.status).toBe("started");
@@ -391,7 +391,7 @@ describe("Byter production server", () => {
       expect(JSON.stringify(latest)).not.toContain("do-not-persist");
       expect(githubClient.createIssueComment).toHaveBeenCalledTimes(2);
       expect(githubClient.createIssueComment.mock.calls[1]?.[3]).toContain("response_format unavailable");
-      expect(githubClient.addLabels).toHaveBeenCalledWith("o", "r", 20, ["byter:triaging"]);
+      expect(githubClient.addLabels).toHaveBeenCalledWith("o", "r", 20, ["patchpilot:triaging"]);
       await expect(readFile(join(liveDataDir, "webhook-runs.jsonl"), "utf8")).resolves.toContain("session-live-1");
     } finally {
       await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
@@ -399,11 +399,11 @@ describe("Byter production server", () => {
   });
 
   it("continues across repeated token cutoffs and binds approval to the final turn", async () => {
-    const staticDir = await mkdtemp(join(tmpdir(), "byter-static-"));
-    const liveDataDir = await mkdtemp(join(tmpdir(), "byter-data-"));
-    await writeFile(join(staticDir, "index.html"), "<main>Byter</main>", "utf8");
+    const staticDir = await mkdtemp(join(tmpdir(), "patchpilot-static-"));
+    const liveDataDir = await mkdtemp(join(tmpdir(), "patchpilot-data-"));
+    await writeFile(join(staticDir, "index.html"), "<main>PatchPilot</main>", "utf8");
     const recoveryResult = JSON.stringify({
-      kind: "byter.result",
+      kind: "patchpilot.result",
       status: "patch-ready",
       summary: "The reported tokenizer failure was reproduced three times.",
       proof: { before: "3/3 failed", after: "3/3 passed", regressions: "Focused regression passed", attempts: "3/3" },
@@ -418,7 +418,7 @@ describe("Byter production server", () => {
       owner: "o",
       repo: "r",
       baseBranch: "main",
-      branchName: `byter/fix-22-${createHash("sha256").update("delivery-recovery-22").digest("hex").slice(0, 10)}`,
+      branchName: `patchpilot/fix-22-${createHash("sha256").update("delivery-recovery-22").digest("hex").slice(0, 10)}`,
       title: "Fix parser crash",
       body: "Verified by recovery.",
       files: [{ path: "src/parser.ts", content: "export const fixed = true;\n" }]
@@ -482,7 +482,7 @@ describe("Byter production server", () => {
       createIssueComment: vi.fn().mockResolvedValue({ id: 702, html_url: "https://github.test/issues/22#issuecomment-702" }),
       addLabels: vi.fn().mockResolvedValue(undefined)
     } as any;
-    const server = createByterServer({ staticDir, dataDir: liveDataDir, trueForgeRuntime, githubClient });
+    const server = createPatchPilotServer({ staticDir, dataDir: liveDataDir, trueForgeRuntime, githubClient });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address() as AddressInfo;
     const isolatedBaseUrl = `http://127.0.0.1:${address.port}`;
@@ -532,19 +532,19 @@ describe("Byter production server", () => {
       const persistedLines = (await readFile(join(liveDataDir, "webhook-runs.jsonl"), "utf8")).trim().split("\n");
       const persisted = JSON.parse(persistedLines.at(-1)!);
       expect(persisted.trueForge.pendingApproval.turnId).toBe("turn-recovery-3");
-      expect(githubClient.addLabels).toHaveBeenCalledWith("o", "r", 22, ["byter:verified"]);
-      expect(githubClient.addLabels).toHaveBeenCalledWith("o", "r", 22, ["byter:awaiting-approval"]);
+      expect(githubClient.addLabels).toHaveBeenCalledWith("o", "r", 22, ["patchpilot:verified"]);
+      expect(githubClient.addLabels).toHaveBeenCalledWith("o", "r", 22, ["patchpilot:awaiting-approval"]);
     } finally {
       await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
     }
   });
 
   it("refreshes persisted TrueForge events when the stream omits the final output", async () => {
-    const staticDir = await mkdtemp(join(tmpdir(), "byter-static-"));
-    const liveDataDir = await mkdtemp(join(tmpdir(), "byter-data-"));
-    await writeFile(join(staticDir, "index.html"), "<main>Byter</main>", "utf8");
+    const staticDir = await mkdtemp(join(tmpdir(), "patchpilot-static-"));
+    const liveDataDir = await mkdtemp(join(tmpdir(), "patchpilot-data-"));
+    await writeFile(join(staticDir, "index.html"), "<main>PatchPilot</main>", "utf8");
     const recoveryResult = JSON.stringify({
-      kind: "byter.result",
+      kind: "patchpilot.result",
       status: "verified",
       summary: "The persisted terminal output contains the verified proof.",
       proof: { before: "3/3 failed", after: "3/3 passed", regressions: "Focused regression passed", attempts: "3/3" },
@@ -568,7 +568,7 @@ describe("Byter production server", () => {
       createIssueComment: vi.fn().mockResolvedValue({ id: 703, html_url: "https://github.test/issues/23#issuecomment-703" }),
       addLabels: vi.fn().mockResolvedValue(undefined)
     } as any;
-    const server = createByterServer({ staticDir, dataDir: liveDataDir, trueForgeRuntime, githubClient });
+    const server = createPatchPilotServer({ staticDir, dataDir: liveDataDir, trueForgeRuntime, githubClient });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address() as AddressInfo;
     const isolatedBaseUrl = `http://127.0.0.1:${address.port}`;
@@ -610,18 +610,18 @@ describe("Byter production server", () => {
       expect(trueForgeRuntime.listSessionEvents).toHaveBeenCalledWith("session-refresh-1");
       expect(latest.run.status).toBe("verified");
       expect(latest.trueForge.result.status).toBe("verified");
-      expect(githubClient.addLabels).toHaveBeenCalledWith("o", "r", 23, ["byter:verified"]);
+      expect(githubClient.addLabels).toHaveBeenCalledWith("o", "r", 23, ["patchpilot:verified"]);
     } finally {
       await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
     }
   });
 
   it("rejects a positive patch result without the mandatory TrueForge approval checkpoint", async () => {
-    const staticDir = await mkdtemp(join(tmpdir(), "byter-static-"));
-    const liveDataDir = await mkdtemp(join(tmpdir(), "byter-data-"));
-    await writeFile(join(staticDir, "index.html"), "<main>Byter</main>", "utf8");
+    const staticDir = await mkdtemp(join(tmpdir(), "patchpilot-static-"));
+    const liveDataDir = await mkdtemp(join(tmpdir(), "patchpilot-data-"));
+    await writeFile(join(staticDir, "index.html"), "<main>PatchPilot</main>", "utf8");
     const proofText = JSON.stringify({
-      kind: "byter.result",
+      kind: "patchpilot.result",
       status: "patch-ready",
       summary: "The focused reproducer failed before the verified tokenizer fix.",
       proof: { before: "3/3 failed", after: "3/3 passed", regressions: "2/2 passed", attempts: "3/3" },
@@ -648,7 +648,7 @@ describe("Byter production server", () => {
       addLabels: vi.fn().mockResolvedValue(undefined),
       removeLabel: vi.fn().mockResolvedValue(undefined)
     } as any;
-    const server = createByterServer({ staticDir, dataDir: liveDataDir, trueForgeRuntime, githubClient });
+    const server = createPatchPilotServer({ staticDir, dataDir: liveDataDir, trueForgeRuntime, githubClient });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address() as AddressInfo;
     const isolatedBaseUrl = `http://127.0.0.1:${address.port}`;
@@ -679,7 +679,7 @@ describe("Byter production server", () => {
       }
       expect(latest.run.status).toBe("failed");
       expect(latest.trueForge.error).toContain("native approval checkpoint");
-      expect(githubClient.addLabels).not.toHaveBeenCalledWith("o", "r", 24, ["byter:verified"]);
+      expect(githubClient.addLabels).not.toHaveBeenCalledWith("o", "r", 24, ["patchpilot:verified"]);
       expect(githubClient.updateIssueComment.mock.calls.at(-1)?.[3]).toContain("complete proof-and-approval contract");
     } finally {
       await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
@@ -687,17 +687,17 @@ describe("Byter production server", () => {
   });
 
   it("persists live proof and resumes the exact TrueForge MCP approval", async () => {
-    const staticDir = await mkdtemp(join(tmpdir(), "byter-static-"));
-    const liveDataDir = await mkdtemp(join(tmpdir(), "byter-data-"));
-    await writeFile(join(staticDir, "index.html"), "<main>Byter</main>", "utf8");
+    const staticDir = await mkdtemp(join(tmpdir(), "patchpilot-static-"));
+    const liveDataDir = await mkdtemp(join(tmpdir(), "patchpilot-data-"));
+    await writeFile(join(staticDir, "index.html"), "<main>PatchPilot</main>", "utf8");
     const proofText = JSON.stringify({
-      kind: "byter.result",
+      kind: "patchpilot.result",
       status: "patch-ready",
       summary: "Reproduced 3/3 and passed the regression check.",
       proof: { before: "3/3 failed in /tmp/private/repro.ts with token=fixture-sensitive", after: "3/3 passed", regressions: "passed", attempts: "3/3" },
       candidatePatch: {
         title: "Fix parser crash",
-        body: "Verified by Byter.",
+        body: "Verified by PatchPilot.",
         baseBranch: "main",
         files: [{ path: "src/parser.ts", content: "export const fixed = true;\n" }]
       }
@@ -706,9 +706,9 @@ describe("Byter production server", () => {
       owner: "o",
       repo: "r",
       baseBranch: "main",
-      branchName: `byter/fix-21-${createHash("sha256").update("delivery-proof-21").digest("hex").slice(0, 10)}`,
+      branchName: `patchpilot/fix-21-${createHash("sha256").update("delivery-proof-21").digest("hex").slice(0, 10)}`,
       title: "Fix parser crash",
-      body: "Verified by Byter.",
+      body: "Verified by PatchPilot.",
       files: [{ path: "src/parser.ts", content: "export const fixed = true;\n" }]
     };
     let approvalSubscriptionAttempts = 0;
@@ -773,7 +773,7 @@ describe("Byter production server", () => {
       addLabels: vi.fn().mockResolvedValue(undefined),
       updateIssueComment: vi.fn().mockImplementation(async (_owner: string, _repo: string, id: number) => ({ id, html_url: "https://github.test/issues/21#issuecomment-700" }))
     } as any;
-    const server = createByterServer({ staticDir, dataDir: liveDataDir, trueForgeRuntime, githubClient });
+    const server = createPatchPilotServer({ staticDir, dataDir: liveDataDir, trueForgeRuntime, githubClient });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address() as AddressInfo;
     const isolatedBaseUrl = `http://127.0.0.1:${address.port}`;
@@ -819,17 +819,17 @@ describe("Byter production server", () => {
       expect(JSON.stringify(latest)).not.toContain("/tmp/private/repro.ts");
       expect(JSON.stringify(latest)).not.toContain("fixture-sensitive");
       expect(latest.githubComments).toHaveLength(1);
-      expect(latest.verifiedLabel.name).toBe("byter:verified");
+      expect(latest.verifiedLabel.name).toBe("patchpilot:verified");
       expect(githubClient.createIssueComment).toHaveBeenCalledTimes(1);
-      expect(githubClient.createIssueComment.mock.calls[0]?.[3]).toContain("## Byter · Environment building");
+      expect(githubClient.createIssueComment.mock.calls[0]?.[3]).toContain("## PatchPilot · Environment building");
       expect(githubClient.createIssueComment.mock.calls[0]?.[3]).not.toContain("approve");
       expect(githubClient.updateIssueComment).toHaveBeenCalledTimes(1);
       expect(githubClient.updateIssueComment.mock.calls[0]?.[3]).toContain("### Proposed fix");
       expect(githubClient.updateIssueComment.mock.calls[0]?.[3]).toContain("Review evidence & approve patch");
       expect(githubClient.updateIssueComment.mock.calls[0]?.[3]).toContain("src/parser.ts");
       expect(githubClient.updateIssueComment.mock.calls[0]?.[3]).not.toContain("export const fixed = true;");
-      expect(githubClient.addLabels).toHaveBeenCalledWith("o", "r", 21, ["byter:verified"]);
-      expect(githubClient.addLabels).toHaveBeenCalledWith("o", "r", 21, ["byter:awaiting-approval"]);
+      expect(githubClient.addLabels).toHaveBeenCalledWith("o", "r", 21, ["patchpilot:verified"]);
+      expect(githubClient.addLabels).toHaveBeenCalledWith("o", "r", 21, ["patchpilot:awaiting-approval"]);
       const runRecord = await fetch(`${isolatedBaseUrl}/api/runs/${encodeURIComponent(latest.run.id)}`).then((runResponse) => runResponse.json());
       expect(runRecord.run.id).toBe(latest.run.id);
       expect(runRecord.trueForge.session).toBeUndefined();
@@ -915,17 +915,17 @@ describe("Byter production server", () => {
   });
 
   it("matches a native approval when its source event wrapper differs", async () => {
-    const staticDir = await mkdtemp(join(tmpdir(), "byter-static-"));
-    const liveDataDir = await mkdtemp(join(tmpdir(), "byter-data-"));
-    await writeFile(join(staticDir, "index.html"), "<main>Byter</main>", "utf8");
+    const staticDir = await mkdtemp(join(tmpdir(), "patchpilot-static-"));
+    const liveDataDir = await mkdtemp(join(tmpdir(), "patchpilot-data-"));
+    await writeFile(join(staticDir, "index.html"), "<main>PatchPilot</main>", "utf8");
     const proofText = JSON.stringify({
-      kind: "byter.result",
+      kind: "patchpilot.result",
       status: "patch-ready",
       summary: "Reproduced 3/3 and passed the regression check.",
       proof: { before: "3/3 failed", after: "3/3 passed", regressions: "passed", attempts: "3/3" },
       candidatePatch: {
         title: "Fix parser crash",
-        body: "Verified by Byter.",
+        body: "Verified by PatchPilot.",
         files: [{ path: "src/parser.ts", content: "export const fixed = true;\n" }]
       }
     });
@@ -933,9 +933,9 @@ describe("Byter production server", () => {
       owner: "o",
       repo: "r",
       baseBranch: "main",
-      branchName: `byter/fix-23-${createHash("sha256").update("delivery-proof-23").digest("hex").slice(0, 10)}`,
+      branchName: `patchpilot/fix-23-${createHash("sha256").update("delivery-proof-23").digest("hex").slice(0, 10)}`,
       title: "Fix parser crash",
-      body: "Verified by Byter.",
+      body: "Verified by PatchPilot.",
       files: [{ path: "src/parser.ts", content: "export const fixed = true;\n" }]
     };
     const trueForgeRuntime = {
@@ -980,7 +980,7 @@ describe("Byter production server", () => {
       addLabels: vi.fn().mockResolvedValue(undefined),
       updateIssueComment: vi.fn().mockResolvedValue({ id: 723, html_url: "https://github.test/issues/23#issuecomment-723" })
     } as any;
-    const server = createByterServer({ staticDir, dataDir: liveDataDir, trueForgeRuntime, githubClient });
+    const server = createPatchPilotServer({ staticDir, dataDir: liveDataDir, trueForgeRuntime, githubClient });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address() as AddressInfo;
     const isolatedBaseUrl = `http://127.0.0.1:${address.port}`;
@@ -1081,9 +1081,9 @@ describe("Byter production server", () => {
   });
 
   it("requires DATA_DIR before accepting persistent write endpoints", async () => {
-    const staticDir = await mkdtemp(join(tmpdir(), "byter-static-"));
-    await writeFile(join(staticDir, "index.html"), "<main>Byter</main>", "utf8");
-    const server = createByterServer({ staticDir });
+    const staticDir = await mkdtemp(join(tmpdir(), "patchpilot-static-"));
+    await writeFile(join(staticDir, "index.html"), "<main>PatchPilot</main>", "utf8");
+    const server = createPatchPilotServer({ staticDir });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address() as AddressInfo;
     const isolatedBaseUrl = `http://127.0.0.1:${address.port}`;
@@ -1144,17 +1144,17 @@ describe("Byter production server", () => {
   });
 
   it("reconciles session events across transient listing errors and recovers the approval write", async () => {
-    const staticDir = await mkdtemp(join(tmpdir(), "byter-static-"));
-    const liveDataDir = await mkdtemp(join(tmpdir(), "byter-data-"));
-    await writeFile(join(staticDir, "index.html"), "<main>Byter</main>", "utf8");
+    const staticDir = await mkdtemp(join(tmpdir(), "patchpilot-static-"));
+    const liveDataDir = await mkdtemp(join(tmpdir(), "patchpilot-data-"));
+    await writeFile(join(staticDir, "index.html"), "<main>PatchPilot</main>", "utf8");
     const proofText = JSON.stringify({
-      kind: "byter.result",
+      kind: "patchpilot.result",
       status: "patch-ready",
       summary: "Reproduced 3/3 and passed the regression check.",
       proof: { before: "3/3 failed", after: "3/3 passed", regressions: "passed", attempts: "3/3" },
       candidatePatch: {
         title: "Fix parser crash",
-        body: "Verified by Byter.",
+        body: "Verified by PatchPilot.",
         baseBranch: "main",
         files: [{ path: "src/parser.ts", content: "export const fixed = true;\n" }]
       }
@@ -1163,9 +1163,9 @@ describe("Byter production server", () => {
       owner: "o",
       repo: "r",
       baseBranch: "main",
-      branchName: `byter/fix-55-${createHash("sha256").update("delivery-reconcile-55").digest("hex").slice(0, 10)}`,
+      branchName: `patchpilot/fix-55-${createHash("sha256").update("delivery-reconcile-55").digest("hex").slice(0, 10)}`,
       title: "Fix parser crash",
-      body: "Verified by Byter.",
+      body: "Verified by PatchPilot.",
       files: [{ path: "src/parser.ts", content: "export const fixed = true;\n" }]
     };
     const pauseEvents = [
@@ -1236,7 +1236,7 @@ describe("Byter production server", () => {
       removeLabel: vi.fn().mockResolvedValue(undefined),
       updateIssueComment: vi.fn().mockImplementation(async (_owner: string, _repo: string, id: number) => ({ id, html_url: "https://github.test/issues/55#issuecomment-888" }))
     } as any;
-    const server = createByterServer({ staticDir, dataDir: liveDataDir, trueForgeRuntime, githubClient });
+    const server = createPatchPilotServer({ staticDir, dataDir: liveDataDir, trueForgeRuntime, githubClient });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address() as AddressInfo;
     const isolatedBaseUrl = `http://127.0.0.1:${address.port}`;
@@ -1301,7 +1301,7 @@ describe("Byter production server", () => {
     const previousCwd = process.cwd();
     process.chdir(packageDir);
     try {
-      const server = createByterServer();
+      const server = createPatchPilotServer();
       await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
       const address = server.address() as AddressInfo;
       const response = await fetch(`http://127.0.0.1:${address.port}`);

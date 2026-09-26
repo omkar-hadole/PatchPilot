@@ -8,10 +8,10 @@ importers:
 
   .:
     dependencies:
-      '@byter/agent':
+      '@patchpilot/agent':
         specifier: workspace:*
         version: link:packages/agent
-      '@byter/github':
+      '@patchpilot/github':
         specifier: workspace:*
         version: link:packages/github
     devDependencies:
@@ -36,16 +36,16 @@ importers:
 
   apps/server:
     dependencies:
-      '@byter/agent':
+      '@patchpilot/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@byter/core':
+      '@patchpilot/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@byter/github':
+      '@patchpilot/github':
         specifier: workspace:*
         version: link:../../packages/github
-      '@byter/github-mcp':
+      '@patchpilot/github-mcp':
         specifier: workspace:*
         version: link:../github-mcp
       pg:
@@ -67,7 +67,7 @@ importers:
 
   apps/web:
     dependencies:
-      '@byter/core':
+      '@patchpilot/core':
         specifier: workspace:*
         version: link:../../packages/core
       katex:
@@ -125,10 +125,10 @@ importers:
 
   packages/agent:
     dependencies:
-      '@byter/core':
+      '@patchpilot/core':
         specifier: workspace:*
         version: link:../core
-      '@byter/github-mcp':
+      '@patchpilot/github-mcp':
         specifier: workspace:*
         version: link:../../apps/github-mcp
     devDependencies:

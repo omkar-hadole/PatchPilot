@@ -1,5 +1,5 @@
 {
-  "name": "@byter/server",
+  "name": "@patchpilot/server",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -19,10 +19,10 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@byter/agent": "workspace:*",
-    "@byter/core": "workspace:*",
-    "@byter/github": "workspace:*",
-    "@byter/github-mcp": "workspace:*",
+    "@patchpilot/agent": "workspace:*",
+    "@patchpilot/core": "workspace:*",
+    "@patchpilot/github": "workspace:*",
+    "@patchpilot/github-mcp": "workspace:*",
     "pg": "^8.13.1"
   },
   "devDependencies": {

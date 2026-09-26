@@ -7,7 +7,7 @@ function record(status: string, result?: Record<string, unknown>, safeToExecute 
     baseBranch: "main",
     issueTitle: "Tokenizer mishandles escaped uppercase literals",
     issueBody: "\\A becomes a.",
-    dashboardUrl: "https://byter.test/runs/run-25",
+    dashboardUrl: "https://patchpilot.test/runs/run-25",
     run: { id: "run-25", status, issue: { owner: "owner", repo: "repo", issueNumber: 25 } },
     scan: { safeToExecute, findings: safeToExecute ? [] : [{ ruleId: "shell-command", severity: "high", reason: "Unsafe command", matchedText: "rm -rf /" }] },
     trueForge: { status: ["triaging", "environment-building", "reproducing"].includes(status) ? "started" : "completed", session: { id: "session-25" }, result }
@@ -20,7 +20,7 @@ const patch = {
   files: [{ path: "src/tokenizer.ts", content: "secret should stay on the dashboard" }],
   hash: "a".repeat(64),
   baseBranch: "main",
-  branchName: "byter/fix-25",
+  branchName: "patchpilot/fix-25",
   verifiedAt: "2026-08-30T00:00:00.000Z"
 };
 
@@ -56,12 +56,12 @@ describe("GitHub status comment rendering", () => {
       status === "verified" ? verifiedResult : status === "failed" || ["triaging", "environment-building", "reproducing", "needs-info", "not-reproduced", "security-review"].includes(status) ? undefined : patchResult,
       status === "security-review" ? false : true
     ), status === "triaging" ? "started" : status === "failed" ? "failed" : status === "pr-created" ? "approval" : "completed");
-    expect(body).toContain(`## Byter · ${label}`);
+    expect(body).toContain(`## PatchPilot · ${label}`);
     expect(body).toContain("Issue #25");
     expect(body).toContain(stateText);
     expect(body.length).toBeLessThan(2_000);
     expect(body).not.toContain("secret should stay on the dashboard");
-    expect(body).not.toContain("/byter approve");
+    expect(body).not.toContain("/patchpilot approve");
   });
 
   it("puts the direct review CTA on the paused patch state", () => {
@@ -73,7 +73,7 @@ describe("GitHub status comment rendering", () => {
       proof: { before: "3/3 failed", after: "3/3 passed", regressions: "3/3 passed", attempts: "3/3" },
       candidatePatch: patch
     }), "completed");
-    expect(body).toContain("https://byter.test/runs/run-25/review");
+    expect(body).toContain("https://patchpilot.test/runs/run-25/review");
     expect(body).toContain("TrueForge is paused");
     expect(body).not.toContain("Technical details");
     expect(body).not.toContain("session-25");

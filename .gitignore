@@ -18,7 +18,7 @@ coverage/
 *.key
 
 # Local runtime state
-.byter/
+.patchpilot/
 .agents/
 PROJECT.md
 PROJECT_STATE.md

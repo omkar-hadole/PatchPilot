@@ -1,5 +1,5 @@
 {
-  "name": "@byter/agent",
+  "name": "@patchpilot/agent",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -18,8 +18,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@byter/core": "workspace:*",
-    "@byter/github-mcp": "workspace:*"
+    "@patchpilot/core": "workspace:*",
+    "@patchpilot/github-mcp": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.5.4",

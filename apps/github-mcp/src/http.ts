@@ -68,7 +68,7 @@ async function dispatchRequest(
     return successResponse(request.id, {
       protocolVersion,
       capabilities: { tools: {} },
-      serverInfo: { name: "byter-github", version: "0.1.0" }
+      serverInfo: { name: "patchpilot-github", version: "0.1.0" }
     });
   }
 
@@ -138,13 +138,13 @@ function inputSchemaFor(name: GitHubMcpToolName) {
           ref: { type: "string" }
         }
       };
-    case "submit_byter_result":
+    case "submit_patchpilot_result":
       return {
         type: "object",
         additionalProperties: false,
         required: ["kind", "status", "summary", "proof", "candidatePatch"],
         properties: {
-          kind: { type: "string", const: "byter.result" },
+          kind: { type: "string", const: "patchpilot.result" },
           status: {
             type: "string",
             enum: ["patch-ready", "verified", "not-reproduced", "blocked", "failed"]
@@ -274,7 +274,7 @@ function expectToolName(value: unknown): GitHubMcpToolName {
   if (
     value === "read_issue" ||
     value === "read_file" ||
-    value === "submit_byter_result" ||
+    value === "submit_patchpilot_result" ||
     value === "add_verified_label" ||
     value === "comment_on_issue" ||
     value === "create_fix_pull_request"

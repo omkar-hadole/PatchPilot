@@ -1,13 +1,13 @@
 name: Reproduce a bug
-description: Ask Byter to reproduce a specific repository failure.
+description: Ask PatchPilot to reproduce a specific repository failure.
 title: "bug: "
 labels:
-  - byter:run
+  - patchpilot:run
 body:
   - type: markdown
     attributes:
       value: |
-        Include a focused failure report. Byter will scan the issue before starting a sandbox.
+        Include a focused failure report. PatchPilot will scan the issue before starting a sandbox.
   - type: textarea
     id: summary
     attributes:
@@ -43,5 +43,5 @@ body:
     attributes:
       label: Run request
       options:
-        - label: I want Byter to investigate this issue.
+        - label: I want PatchPilot to investigate this issue.
           required: true

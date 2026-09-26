@@ -6,8 +6,8 @@
     "outDir": "dist",
     "rootDir": "src",
     "paths": {
-      "@byter/core": ["../core/src/index.js"],
-      "@byter/github-mcp": ["../../apps/github-mcp/src/index.js"]
+      "@patchpilot/core": ["../core/src/index.js"],
+      "@patchpilot/github-mcp": ["../../apps/github-mcp/src/index.js"]
     }
   },
   "references": [{ "path": "../core" }, { "path": "../../apps/github-mcp" }],

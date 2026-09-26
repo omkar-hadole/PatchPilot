@@ -17,7 +17,7 @@ export interface TrueForgeRuntimeEvent {
 
 export type TrueForgeRuntimeEventListener = (event: TrueForgeRuntimeEvent) => void | Promise<void>;
 
-export interface StartByterSessionInput {
+export interface StartPatchPilotSessionInput {
   issueUrl: string;
   issueTitle: string;
   issueBody: string;
@@ -36,7 +36,7 @@ export interface ResolveToolApprovalInput {
   reason?: string;
 }
 
-export interface StartByterSessionResult {
+export interface StartPatchPilotSessionResult {
   session: TrueForgeSession;
   turn: TrueForgeTurn;
 }

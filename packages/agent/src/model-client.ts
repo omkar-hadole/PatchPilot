@@ -121,7 +121,10 @@ export class ModelClient implements ModelClientLike {
         }
         const backoffMs = Math.min(2 ** attempt * 500, 15_000) + Math.floor(Math.random() * 250);
         const suggestedMs = error instanceof ModelHttpError ? error.retryAfterMs : undefined;
-        await sleep(suggestedMs ? Math.min(Math.max(suggestedMs, backoffMs), maxRetryAfterMs) : backoffMs);
+        const sleepMs = suggestedMs ? Math.min(Math.max(suggestedMs, backoffMs), maxRetryAfterMs) : backoffMs;
+        const reason = error instanceof Error ? error.message : String(error);
+        console.warn(`[model] Request failed (attempt ${attempt + 1}/${this.config.maxRetries}): ${reason}. Waiting ${(sleepMs / 1000).toFixed(1)}s before retry...`);
+        await sleep(sleepMs);
       }
     }
     throw lastError;

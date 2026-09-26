@@ -1,5 +1,5 @@
 {
-  "name": "@byter/github-mcp",
+  "name": "@patchpilot/github-mcp",
   "version": "0.1.0",
   "private": true,
   "type": "module",

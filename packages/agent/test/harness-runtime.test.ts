@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { PatchPilotHarnessRuntime } from "../src/harness-runtime.js";
 import { ModelHttpError, type ModelClientLike, type ModelMessage, type ModelResponse, type ModelToolSchema } from "../src/model-client.js";
 import type { SandboxExecutionResult, SandboxProvider, SandboxWorkspace } from "../src/sandbox.js";
-import type { GitHubRestClientLike } from "@byter/github-mcp";
+import type { GitHubRestClientLike } from "@patchpilot/github-mcp";
 
 const baseInput = {
   issueUrl: "https://github.com/acme/widgets/issues/32",
@@ -10,7 +10,7 @@ const baseInput = {
   issueBody: "paginate() drops the last item on the final page.",
   repository: "acme/widgets",
   baseBranch: "main",
-  branchName: "byter/fix-32"
+  branchName: "patchpilot/fix-32"
 };
 
 function scriptedModel(responses: ModelResponse[]): ModelClientLike {
@@ -73,8 +73,8 @@ function fakeGitHubClient(overrides: Partial<GitHubRestClientLike> = {}): GitHub
   };
 }
 
-const byterResultArgs = {
-  kind: "byter.result",
+const patchpilotResultArgs = {
+  kind: "patchpilot.result",
   status: "patch-ready",
   summary: "Fixed the off-by-one in paginate() and verified with a 3/3 reproduction.",
   proof: {
@@ -94,7 +94,7 @@ const createPrArgs = {
   owner: "acme",
   repo: "widgets",
   baseBranch: "main",
-  branchName: "byter/fix-32",
+  branchName: "patchpilot/fix-32",
   title: "Fix off-by-one in paginate()",
   body: "Corrects the final-page boundary check.",
   files: [{ path: "src/paginate.ts", content: "export function paginate() { /* fixed */ }" }]
@@ -105,7 +105,7 @@ describe("PatchPilotHarnessRuntime", () => {
     const model = scriptedModel([
       { content: null, toolCalls: [{ id: "call_1", name: "read_file", arguments: { owner: "acme", repo: "widgets", path: "src/paginate.ts" } }], finishReason: "tool_calls" },
       { content: null, toolCalls: [{ id: "call_2", name: "run_command", arguments: { command: "node --experimental-strip-types repro.ts" } }], finishReason: "tool_calls" },
-      { content: null, toolCalls: [{ id: "call_3", name: "submit_byter_result", arguments: byterResultArgs }], finishReason: "tool_calls" },
+      { content: null, toolCalls: [{ id: "call_3", name: "submit_patchpilot_result", arguments: patchpilotResultArgs }], finishReason: "tool_calls" },
       { content: null, toolCalls: [{ id: "call_4", name: "create_fix_pull_request", arguments: createPrArgs }], finishReason: "tool_calls" }
     ]);
 
@@ -126,16 +126,16 @@ describe("PatchPilotHarnessRuntime", () => {
 
     const submitEvent = events.find((event) => {
       const raw = event.raw as { tool_calls?: Array<{ function: { name: string } }> };
-      return raw.tool_calls?.some((call) => call.function.name === "submit_byter_result");
+      return raw.tool_calls?.some((call) => call.function.name === "submit_patchpilot_result");
     });
     expect(submitEvent).toBeDefined();
   });
 
   it("executes the approved write and reaches turn.done after allow", async () => {
     const model = scriptedModel([
-      { content: null, toolCalls: [{ id: "call_3", name: "submit_byter_result", arguments: byterResultArgs }], finishReason: "tool_calls" },
+      { content: null, toolCalls: [{ id: "call_3", name: "submit_patchpilot_result", arguments: patchpilotResultArgs }], finishReason: "tool_calls" },
       { content: null, toolCalls: [{ id: "call_4", name: "create_fix_pull_request", arguments: createPrArgs }], finishReason: "tool_calls" },
-      { content: JSON.stringify(byterResultArgs), toolCalls: [], finishReason: "stop" }
+      { content: JSON.stringify(patchpilotResultArgs), toolCalls: [], finishReason: "stop" }
     ]);
 
     let pullRequestCreated = false;
@@ -175,7 +175,7 @@ describe("PatchPilotHarnessRuntime", () => {
 
   it("does not call the write tool when the maintainer denies", async () => {
     const model = scriptedModel([
-      { content: null, toolCalls: [{ id: "call_3", name: "submit_byter_result", arguments: byterResultArgs }], finishReason: "tool_calls" },
+      { content: null, toolCalls: [{ id: "call_3", name: "submit_patchpilot_result", arguments: patchpilotResultArgs }], finishReason: "tool_calls" },
       { content: null, toolCalls: [{ id: "call_4", name: "create_fix_pull_request", arguments: createPrArgs }], finishReason: "tool_calls" }
     ]);
 
@@ -262,5 +262,76 @@ describe("PatchPilotHarnessRuntime", () => {
     const raw = doneEvent!.raw as { state: { status: string; message: string } };
     expect(raw.state.status).toBe("error");
     expect(raw.state.message).toMatch(/token budget/i);
+  });
+
+  it("does not re-fetch a file it already read in this session", async () => {
+    let getFileCalls = 0;
+    const client = fakeGitHubClient({
+      async getFile() {
+        getFileCalls += 1;
+        return { path: "src/paginate.ts", sha: "abc", encoding: "utf-8", content: "export function paginate() {}" };
+      }
+    });
+
+    const readArgs = { owner: "acme", repo: "widgets", path: "src/paginate.ts" };
+    const model = scriptedModel([
+      { content: null, toolCalls: [{ id: "call_1", name: "read_file", arguments: readArgs }], finishReason: "tool_calls" },
+      { content: null, toolCalls: [{ id: "call_2", name: "read_file", arguments: { ...readArgs } }], finishReason: "tool_calls" },
+      { content: "Done, no duplicate fetch needed.", toolCalls: [], finishReason: "stop" }
+    ]);
+
+    const runtime = new PatchPilotHarnessRuntime({ githubClient: client, model, sandboxProvider: fakeSandbox() });
+    const { session, turn } = await runtime.startSession(baseInput);
+    const events = await runtime.subscribeToTurn(session.id, turn.id);
+
+    expect(getFileCalls).toBe(1);
+    const secondResponse = events.filter((event) => event.type === "tool.response")[1];
+    const raw = secondResponse.raw as { content: string };
+    expect(JSON.parse(raw.content).note).toMatch(/already made earlier/i);
+  });
+
+  it("truncates old tool outputs once the conversation grows past the recent-message window", async () => {
+    const longContent = "x".repeat(2000);
+    const toolCalls = Array.from({ length: 6 }, (_, i) => ({
+      id: `call_${i}`,
+      name: "read_file" as const,
+      arguments: { owner: "acme", repo: "widgets", path: `src/file-${i}.ts` }
+    }));
+
+    const responses: ModelResponse[] = toolCalls.map((call) => ({
+      content: null,
+      toolCalls: [call],
+      finishReason: "tool_calls"
+    }));
+    responses.push({ content: "Finished.", toolCalls: [], finishReason: "stop" });
+
+    let callIndex = 0;
+    const receivedMessagesPerCall: ModelMessage[][] = [];
+    const model: ModelClientLike = {
+      async chat(messages: ModelMessage[]): Promise<ModelResponse> {
+        receivedMessagesPerCall.push(messages.map((m) => ({ ...m })));
+        const response = responses[Math.min(callIndex, responses.length - 1)];
+        callIndex += 1;
+        return response;
+      }
+    };
+
+    const client = fakeGitHubClient({
+      async getFile() {
+        return { path: "src/file.ts", sha: "abc", encoding: "utf-8", content: longContent };
+      }
+    });
+
+    const runtime = new PatchPilotHarnessRuntime({ githubClient: client, model, sandboxProvider: fakeSandbox() });
+    await runtime.startSession(baseInput);
+
+    const finalCallMessages = receivedMessagesPerCall[receivedMessagesPerCall.length - 1];
+    const toolMessages = finalCallMessages.filter((m): m is Extract<ModelMessage, { role: "tool" }> => m.role === "tool");
+
+    expect(toolMessages.length).toBeGreaterThan(4);
+    const oldest = toolMessages[0];
+    const mostRecent = toolMessages[toolMessages.length - 1];
+    expect(oldest.content).toMatch(/truncated to save context/i);
+    expect(mostRecent.content.length).toBeGreaterThan(1000);
   });
 });

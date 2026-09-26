@@ -27,7 +27,7 @@ import {
   X
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
-import type { RunEvent, RunStatus } from "@byter/core";
+import type { RunEvent, RunStatus } from "@patchpilot/core";
 import { readApprovalSubmission, submitApprovalAction, type ApprovalSubmission } from "./approval-client";
 import { MarkdownContent } from "./MarkdownContent";
 import {
@@ -106,7 +106,7 @@ function App() {
   }
 
   if (isLoading) {
-    return <StatusScreen icon={<RefreshCw size={22} />} title="Loading Byter run" detail="Connecting to the run record." />;
+    return <StatusScreen icon={<RefreshCw size={22} />} title="Loading PatchPilot run" detail="Connecting to the run record." />;
   }
 
   if (loadError || !run || !displayedStatus) {
@@ -134,7 +134,7 @@ function App() {
       <header className="topbar">
         <div className="brand-lockup">
           <div>
-            <p className="eyebrow">Byter run</p>
+            <p className="eyebrow">PatchPilot run</p>
             <h1>{run.issueTitle}</h1>
             <p className="header-subtitle">{run.repoLabel} <span>/</span> issue #{run.issue.issueNumber}</p>
           </div>

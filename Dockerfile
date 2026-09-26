@@ -24,4 +24,4 @@ COPY --from=build /app/apps ./apps
 COPY --from=build /app/packages ./packages
 
 EXPOSE 3000
-CMD ["pnpm", "--filter", "@byter/server", "start"]
+CMD ["pnpm", "--filter", "@patchpilot/server", "start"]

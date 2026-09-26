@@ -5,21 +5,24 @@ import {
   type GitHubMcpToolName,
   type GitHubMcpWriteToolName,
   type GitHubRestClientLike
-} from "@byter/github-mcp";
+} from "@patchpilot/github-mcp";
 import { ModelHttpError, type ModelClientLike, type ModelMessage, type ModelToolSchema } from "./model-client.js";
 import { LocalSandboxProvider, type SandboxProvider, type SandboxWorkspace } from "./sandbox.js";
-import { buildInitialUserMessage, buildProofContractRecoveryMessage, buildHarnessSystemPrompt } from "./byter-agent.js";
+import { buildInitialUserMessage, buildProofContractRecoveryMessage, buildHarnessSystemPrompt } from "./patchpilot-agent.js";
 import type {
   ResolveToolApprovalInput,
-  StartByterSessionInput,
-  StartByterSessionResult,
+  StartPatchPilotSessionInput,
+  StartPatchPilotSessionResult,
   TrueForgeRuntimeEvent,
   TrueForgeRuntimeEventListener,
   TrueForgeTurn
 } from "./types.js";
 
 const gatedTools = new Set<GitHubMcpWriteToolName>(["add_verified_label", "comment_on_issue", "create_fix_pull_request"]);
+const cacheableReadTools = new Set<string>(["read_issue", "read_file"]);
 const maxIterationsDefault = 40;
+const maxFullToolMessages = 4;
+const truncatedToolMessageMaxLen = 400;
 
 interface PendingApprovalState {
   turnId: string;
@@ -39,6 +42,7 @@ interface SessionRecord {
   eventsByTurn: Map<string, TrueForgeRuntimeEvent[]>;
   allEvents: TrueForgeRuntimeEvent[];
   pendingApproval?: PendingApprovalState;
+  seenReadCalls: Set<string>;
 }
 
 export interface HarnessRuntimeConfig {
@@ -46,10 +50,11 @@ export interface HarnessRuntimeConfig {
   model: ModelClientLike;
   sandboxProvider?: SandboxProvider;
   maxIterations?: number;
+  onEvent?: TrueForgeRuntimeEventListener;
 }
 
 /**
- * Byter's own coding-agent harness: calls the configured model directly,
+ * PatchPilot's own coding-agent harness: calls the configured model directly,
  * executes GitHub MCP tools and sandbox commands in-process, and pauses on
  * gated writes for maintainer approval. Implements the same session/turn
  * surface the server previously drove through TrueForge, so apps/server
@@ -60,6 +65,7 @@ export class PatchPilotHarnessRuntime {
   private readonly model: ModelClientLike;
   private readonly sandboxProvider: SandboxProvider;
   private readonly maxIterations: number;
+  private readonly onEvent?: TrueForgeRuntimeEventListener;
   private readonly sessions = new Map<string, SessionRecord>();
 
   constructor(config: HarnessRuntimeConfig) {
@@ -67,9 +73,10 @@ export class PatchPilotHarnessRuntime {
     this.model = config.model;
     this.sandboxProvider = config.sandboxProvider ?? new LocalSandboxProvider();
     this.maxIterations = config.maxIterations ?? maxIterationsDefault;
+    this.onEvent = config.onEvent;
   }
 
-  async startSession(input: StartByterSessionInput): Promise<StartByterSessionResult> {
+  async startSession(input: StartPatchPilotSessionInput): Promise<StartPatchPilotSessionResult> {
     const sessionId = `session_${randomUUID()}`;
     const session: SessionRecord = {
       id: sessionId,
@@ -79,7 +86,8 @@ export class PatchPilotHarnessRuntime {
         { role: "user", content: buildInitialUserMessage(input) }
       ],
       eventsByTurn: new Map(),
-      allEvents: []
+      allEvents: [],
+      seenReadCalls: new Set()
     };
     this.sessions.set(sessionId, session);
 
@@ -166,6 +174,7 @@ export class PatchPilotHarnessRuntime {
     let malformedGenerationRetries = 0;
 
     for (let iteration = 0; iteration < this.maxIterations; iteration++) {
+      this.compactSessionMessages(session);
       let response;
       try {
         response = await this.model.chat(session.messages, toolSchemas());
@@ -255,27 +264,35 @@ export class PatchPilotHarnessRuntime {
 
         const isSandboxTool = call.name === "run_command";
         let resultText: string;
-        try {
-          if (isSandboxTool) {
-            const sandbox = await this.ensureSandbox(session, turnId);
-            const command = String(call.arguments.command ?? "");
-            const timeoutMs = typeof call.arguments.timeoutMs === "number" ? call.arguments.timeoutMs : undefined;
-            const execution = await sandbox.exec(command, timeoutMs);
-            resultText = JSON.stringify({
-              exitCode: execution.exitCode,
-              stdout: execution.stdout,
-              stderr: execution.stderr,
-              timedOut: execution.timedOut
-            });
-          } else {
-            const toolResult = await this.githubTools.callTool({
-              name: call.name as GitHubMcpToolName,
-              arguments: call.arguments
-            });
-            resultText = JSON.stringify({ result: toolResult.content.map((part) => part.text).join("\n") });
+        const readCacheKey = cacheableReadTools.has(call.name) ? `${call.name}:${stableArgsKey(call.arguments)}` : undefined;
+        if (readCacheKey && session.seenReadCalls.has(readCacheKey)) {
+          resultText = JSON.stringify({
+            note: "Identical to a call already made earlier in this session. Re-use the content from that earlier tool result instead of reading it again."
+          });
+        } else {
+          try {
+            if (isSandboxTool) {
+              const sandbox = await this.ensureSandbox(session, turnId);
+              const command = String(call.arguments.command ?? "");
+              const timeoutMs = typeof call.arguments.timeoutMs === "number" ? call.arguments.timeoutMs : undefined;
+              const execution = await sandbox.exec(command, timeoutMs);
+              resultText = JSON.stringify({
+                exitCode: execution.exitCode,
+                stdout: execution.stdout,
+                stderr: execution.stderr,
+                timedOut: execution.timedOut
+              });
+            } else {
+              const toolResult = await this.githubTools.callTool({
+                name: call.name as GitHubMcpToolName,
+                arguments: call.arguments
+              });
+              resultText = JSON.stringify({ result: toolResult.content.map((part) => part.text).join("\n") });
+            }
+            if (readCacheKey) session.seenReadCalls.add(readCacheKey);
+          } catch (error) {
+            resultText = JSON.stringify({ error: error instanceof Error ? error.message : "Tool call failed" });
           }
-        } catch (error) {
-          resultText = JSON.stringify({ error: error instanceof Error ? error.message : "Tool call failed" });
         }
 
         this.recordToolResponseEvent(session, turnId, resultText, isSandboxTool);
@@ -283,8 +300,27 @@ export class PatchPilotHarnessRuntime {
       }
     }
 
-    this.recordDoneEvent(session, turnId, "Byter agent exhausted its token budget before completing this turn");
+    this.recordDoneEvent(session, turnId, "PatchPilot agent exhausted its token budget before completing this turn");
     await session.sandbox?.cleanup();
+  }
+
+  private compactSessionMessages(session: SessionRecord): void {
+    const toolIndices: number[] = [];
+    session.messages.forEach((message, index) => {
+      if (message.role === "tool") toolIndices.push(index);
+    });
+    if (toolIndices.length <= maxFullToolMessages) return;
+
+    const cutoffIndex = toolIndices[toolIndices.length - maxFullToolMessages];
+    for (let i = 0; i < cutoffIndex; i++) {
+      const message = session.messages[i];
+      if (message.role !== "tool") continue;
+      if (message.content.length <= truncatedToolMessageMaxLen) continue;
+      session.messages[i] = {
+        ...message,
+        content: `[older tool output truncated to save context; original was ${message.content.length} chars]`
+      };
+    }
   }
 
   private async ensureSandbox(session: SessionRecord, turnId: string): Promise<SandboxWorkspace> {
@@ -333,7 +369,20 @@ export class PatchPilotHarnessRuntime {
     const turnEvents = session.eventsByTurn.get(turnId) ?? [];
     turnEvents.push(sequenced);
     session.eventsByTurn.set(turnId, turnEvents);
+    if (this.onEvent) {
+      Promise.resolve(this.onEvent(sequenced)).catch(() => {});
+    }
   }
+}
+
+function stableArgsKey(args: Record<string, unknown>): string {
+  const sorted = Object.keys(args)
+    .sort()
+    .reduce<Record<string, unknown>>((acc, key) => {
+      acc[key] = args[key];
+      return acc;
+    }, {});
+  return JSON.stringify(sorted);
 }
 
 function isMalformedGenerationError(error: unknown): boolean {
@@ -377,13 +426,13 @@ function toolSchemas(): ModelToolSchema[] {
       }
     },
     {
-      name: "submit_byter_result",
-      description: "Submit the final Byter proof contract without mutating GitHub.",
+      name: "submit_patchpilot_result",
+      description: "Submit the final PatchPilot proof contract without mutating GitHub.",
       parameters: {
         type: "object",
         required: ["kind", "status", "summary", "proof", "candidatePatch"],
         properties: {
-          kind: { type: "string", const: "byter.result" },
+          kind: { type: "string", const: "patchpilot.result" },
           status: { type: "string", enum: ["patch-ready", "verified", "not-reproduced", "blocked", "failed"] },
           summary: { type: "string" },
           proof: {
@@ -422,7 +471,7 @@ function toolSchemas(): ModelToolSchema[] {
     },
     {
       name: "comment_on_issue",
-      description: "Post a Byter evidence comment. Requires maintainer approval.",
+      description: "Post a PatchPilot evidence comment. Requires maintainer approval.",
       parameters: {
         type: "object",
         required: ["owner", "repo", "issueNumber", "body"],
