@@ -113,7 +113,7 @@ interface WebhookRunRecord {
   approvalLabel?: { name: "patchpilot:awaiting-approval"; appliedAt?: string; error?: string };
   run: ReproRun;
   scan: SecurityScanResult;
-  trueForge?: {
+  patchPilot?: {
     status?: string;
     reason?: string;
     error?: string;
@@ -167,18 +167,18 @@ export async function fetchDashboardRun(fetchImpl: typeof fetch = fetch): Promis
 }
 
 export function toDashboardRunFromWebhook(record: WebhookRunRecord): DashboardRun {
-  const trueForgeStatus = record.trueForge?.status ?? "unknown";
-  const liveResult = record.trueForge?.result;
+  const patchPilotStatus = record.patchPilot?.status ?? "unknown";
+  const liveResult = record.patchPilot?.result;
   const livePatch = liveResult?.candidatePatch;
   const pullRequest = liveResult?.pullRequest;
-  const trueForgeDetail =
+  const patchPilotDetail =
     (liveResult?.summary ? publicSafeMarkdown(liveResult.summary) : undefined) ??
-    record.trueForge?.reason ??
-    record.trueForge?.error ??
-    "No TrueForge metadata returned";
-  const trueForgeBlocked = trueForgeStatus === "failed" || trueForgeStatus === "not-configured" || liveResult?.status === "failed";
+    record.patchPilot?.reason ??
+    record.patchPilot?.error ??
+    "No PatchPilot metadata returned";
+  const patchPilotBlocked = patchPilotStatus === "failed" || patchPilotStatus === "not-configured" || liveResult?.status === "failed";
   const issueBodySize = new Blob([record.issueBody]).size;
-  const trace = (record.trueForge?.events ?? []).map(sanitizeTraceEvent);
+  const trace = (record.patchPilot?.events ?? []).map(sanitizeTraceEvent);
   const commentHistory = record.githubComments ?? (record.githubStatusComment ? [{ ...record.githubStatusComment, kind: "legacy" as const, createdAt: record.receivedAt }] : []);
   const latestComment = commentHistory.at(-1);
 
@@ -187,7 +187,7 @@ export function toDashboardRunFromWebhook(record: WebhookRunRecord): DashboardRu
     events: record.run.events.map((event) => ({
       ...event,
       message: publicSafeMarkdown(event.message)
-        .replace(/TrueForge session started/gi, "TrueForge investigation started")
+        .replace(/PatchPilot session started/gi, "PatchPilot investigation started")
         .replace(/\bsession\b/gi, "investigation")
         .replace(/\bturn\b/gi, "step")
     })),
@@ -196,9 +196,9 @@ export function toDashboardRunFromWebhook(record: WebhookRunRecord): DashboardRu
     sourceLabel: "latest GitHub webhook",
     repoLabel: record.repository.replace("/", " / "),
     issueTitle: record.issueTitle,
-    assignee: trueForgeStatus === "started" || liveResult ? "TrueForge agent" : "Server intake",
-    runtime: trueForgeStatus === "started" || liveResult ? "TrueForge Agent Harness" : "Webhook intake",
-    model: record.trueForge?.model ?? (trueForgeStatus === "started" || liveResult ? "Configured by TrueForge" : "Not started"),
+    assignee: patchPilotStatus === "started" || liveResult ? "PatchPilot agent" : "Server intake",
+    runtime: patchPilotStatus === "started" || liveResult ? "PatchPilot Agent Harness" : "Webhook intake",
+    model: record.patchPilot?.model ?? (patchPilotStatus === "started" || liveResult ? "Configured by PatchPilot" : "Not started"),
     currentBranch: livePatch?.branchName ?? `delivery ${record.deliveryId}`,
     ...(liveResult?.summary ? { summary: publicSafeMarkdown(liveResult.summary) } : {}),
     ...(liveResult?.rootCauseSummary ? { rootCauseSummary: publicSafeMarkdown(liveResult.rootCauseSummary) } : {}),
@@ -221,11 +221,11 @@ export function toDashboardRunFromWebhook(record: WebhookRunRecord): DashboardRu
     ...(liveResult?.proof ? { proof: compactProof(liveResult.proof) } : {}),
     tests: buildLiveTests(liveResult?.proof, trace),
     harness: {
-      model: record.trueForge?.model ?? (trueForgeStatus === "started" || liveResult ? "Configured model" : "Not started"),
-      provider: record.trueForge?.provider ?? (trueForgeStatus === "started" || liveResult ? "Configured provider" : "Not started"),
-      sessionId: record.trueForge?.session?.id,
-      turnId: record.trueForge?.turn?.id,
-      status: harnessStatusFor(record.run.status, trueForgeStatus, liveResult?.status),
+      model: record.patchPilot?.model ?? (patchPilotStatus === "started" || liveResult ? "Configured model" : "Not started"),
+      provider: record.patchPilot?.provider ?? (patchPilotStatus === "started" || liveResult ? "Configured provider" : "Not started"),
+      sessionId: record.patchPilot?.session?.id,
+      turnId: record.patchPilot?.turn?.id,
+      status: harnessStatusFor(record.run.status, patchPilotStatus, liveResult?.status),
       currentTask: currentTaskFor(record.run.status, liveResult?.summary ? publicSafeMarkdown(liveResult.summary) : undefined),
       trace,
       mcpCalls: trace.filter((event) => event.category === "mcp" && event.type !== "mcp.initialize").length,
@@ -247,12 +247,12 @@ export function toDashboardRunFromWebhook(record: WebhookRunRecord): DashboardRu
         status: record.scan.safeToExecute ? "verified" : "blocked"
       },
       {
-        id: "trueforge-session",
+        id: "patchpilot-session",
         kind: "stdout",
-        title: "TrueForge handoff",
-        value: trueForgeStatus,
-        detail: trueForgeDetail,
-        status: trueForgeBlocked ? "blocked" : liveResult ? "verified" : trueForgeStatus === "started" ? "verified" : "warning"
+        title: "PatchPilot handoff",
+        value: patchPilotStatus,
+        detail: patchPilotDetail,
+        status: patchPilotBlocked ? "blocked" : liveResult ? "verified" : patchPilotStatus === "started" ? "verified" : "warning"
       },
       ...(liveResult?.proof
         ? [
@@ -296,7 +296,7 @@ export const approvalActions: ApprovalAction[] = [
   {
     id: "approve-pr",
     label: "Approve & Resume",
-    description: "Resume TrueForge, commit the verified patch, and open a draft PR.",
+    description: "Resume PatchPilot, commit the verified patch, and open a draft PR.",
     impact: "safe"
   },
   {
@@ -388,13 +388,13 @@ export const statusLabels: Record<RunStatus, string> = {
 
 function harnessStatusFor(
   runStatus: RunStatus,
-  trueForgeStatus: string,
+  patchPilotStatus: string,
   resultStatus: string | undefined
 ): HarnessState["status"] {
-  if (trueForgeStatus === "not-configured") return "not-configured";
-  if (trueForgeStatus === "failed" || resultStatus === "failed" || runStatus === "failed") return "failed";
+  if (patchPilotStatus === "not-configured") return "not-configured";
+  if (patchPilotStatus === "failed" || resultStatus === "failed" || runStatus === "failed") return "failed";
   if (runStatus === "awaiting-approval") return "paused";
-  if (trueForgeStatus === "completed" || runStatus === "pr-created") return "completed";
+  if (patchPilotStatus === "completed" || runStatus === "pr-created") return "completed";
   return "running";
 }
 

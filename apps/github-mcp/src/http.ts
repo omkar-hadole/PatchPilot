@@ -96,7 +96,7 @@ async function dispatchRequest(
     let result: GitHubMcpToolResult;
 
     try {
-      // TrueForge enforces requireApprovalForTools on this authenticated MCP server.
+      // PatchPilot enforces requireApprovalForTools on this authenticated MCP server.
       result = await tools.callTool({
         name,
         arguments: args,

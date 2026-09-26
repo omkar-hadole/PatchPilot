@@ -129,7 +129,7 @@ export class PostgresStore {
       const record = row.record;
       if (
         record.run?.status === "awaiting-approval" ||
-        record.trueForge?.pendingApproval
+        record.patchPilot?.pendingApproval
       ) {
         return record;
       }

@@ -76,7 +76,7 @@ describe("GitHub MCP HTTP transport", () => {
     expect(result.result.content[0].text).toContain("Parser crash");
   });
 
-  it("passes remote writes through the TrueForge approval boundary", async () => {
+  it("passes remote writes through the PatchPilot approval boundary", async () => {
     const result = await callMcp(
       "tools/call",
       {

@@ -1,21 +1,21 @@
-export interface TrueForgeSession {
+export interface PatchPilotSession {
   id: string;
   title: string | null;
 }
 
-export interface TrueForgeTurn {
+export interface PatchPilotTurn {
   id: string;
   sessionId: string;
   status: string;
 }
 
-export interface TrueForgeRuntimeEvent {
+export interface PatchPilotRuntimeEvent {
   sequenceNumber?: number;
   type: string;
   raw: unknown;
 }
 
-export type TrueForgeRuntimeEventListener = (event: TrueForgeRuntimeEvent) => void | Promise<void>;
+export type PatchPilotRuntimeEventListener = (event: PatchPilotRuntimeEvent) => void | Promise<void>;
 
 export interface StartPatchPilotSessionInput {
   issueUrl: string;
@@ -37,6 +37,6 @@ export interface ResolveToolApprovalInput {
 }
 
 export interface StartPatchPilotSessionResult {
-  session: TrueForgeSession;
-  turn: TrueForgeTurn;
+  session: PatchPilotSession;
+  turn: PatchPilotTurn;
 }

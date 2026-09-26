@@ -10,7 +10,7 @@ function record(status: string, result?: Record<string, unknown>, safeToExecute 
     dashboardUrl: "https://patchpilot.test/runs/run-25",
     run: { id: "run-25", status, issue: { owner: "owner", repo: "repo", issueNumber: 25 } },
     scan: { safeToExecute, findings: safeToExecute ? [] : [{ ruleId: "shell-command", severity: "high", reason: "Unsafe command", matchedText: "rm -rf /" }] },
-    trueForge: { status: ["triaging", "environment-building", "reproducing"].includes(status) ? "started" : "completed", session: { id: "session-25" }, result }
+    patchPilot: { status: ["triaging", "environment-building", "reproducing"].includes(status) ? "started" : "completed", session: { id: "session-25" }, result }
   } as any;
 }
 
@@ -26,14 +26,14 @@ const patch = {
 
 describe("GitHub status comment rendering", () => {
   it.each([
-    ["triaging", "Investigating", "TrueForge is inspecting"],
+    ["triaging", "Investigating", "PatchPilot is inspecting"],
     ["environment-building", "Environment building", "preparing an isolated environment"],
     ["reproducing", "Reproducing", "running the reported scenario"],
     ["needs-info", "Needs information", "Add the missing runtime"],
     ["not-reproduced", "Not reproduced", "did not observe the claimed failure"],
     ["verified", "Verified", "No candidate patch was returned"],
     ["security-review", "Security review", "Execution was held"],
-    ["awaiting-approval", "Patch ready for review", "TrueForge is paused"],
+    ["awaiting-approval", "Patch ready for review", "PatchPilot is paused"],
     ["pr-created", "Fix proposed", "Draft PR created"],
     ["failed", "Run failed", "complete proof-and-approval contract"]
   ])("renders the %s state as a concise status comment", (status, label, stateText) => {
@@ -74,7 +74,7 @@ describe("GitHub status comment rendering", () => {
       candidatePatch: patch
     }), "completed");
     expect(body).toContain("https://patchpilot.test/runs/run-25/review");
-    expect(body).toContain("TrueForge is paused");
+    expect(body).toContain("PatchPilot is paused");
     expect(body).not.toContain("Technical details");
     expect(body).not.toContain("session-25");
     expect(body).not.toContain(patch.hash);

@@ -13,9 +13,9 @@ import type {
   ResolveToolApprovalInput,
   StartPatchPilotSessionInput,
   StartPatchPilotSessionResult,
-  TrueForgeRuntimeEvent,
-  TrueForgeRuntimeEventListener,
-  TrueForgeTurn
+  PatchPilotRuntimeEvent,
+  PatchPilotRuntimeEventListener,
+  PatchPilotTurn
 } from "./types.js";
 
 const gatedTools = new Set<GitHubMcpWriteToolName>(["add_verified_label", "comment_on_issue", "create_fix_pull_request"]);
@@ -39,8 +39,8 @@ interface SessionRecord {
   title: string | null;
   messages: ModelMessage[];
   sandbox?: SandboxWorkspace;
-  eventsByTurn: Map<string, TrueForgeRuntimeEvent[]>;
-  allEvents: TrueForgeRuntimeEvent[];
+  eventsByTurn: Map<string, PatchPilotRuntimeEvent[]>;
+  allEvents: PatchPilotRuntimeEvent[];
   pendingApproval?: PendingApprovalState;
   seenReadCalls: Set<string>;
 }
@@ -50,14 +50,14 @@ export interface HarnessRuntimeConfig {
   model: ModelClientLike;
   sandboxProvider?: SandboxProvider;
   maxIterations?: number;
-  onEvent?: TrueForgeRuntimeEventListener;
+  onEvent?: PatchPilotRuntimeEventListener;
 }
 
 /**
  * PatchPilot's own coding-agent harness: calls the configured model directly,
  * executes GitHub MCP tools and sandbox commands in-process, and pauses on
  * gated writes for maintainer approval. Implements the same session/turn
- * surface the server previously drove through TrueForge, so apps/server
+ * surface the server previously drove through PatchPilot, so apps/server
  * needs no changes beyond how this runtime is constructed.
  */
 export class PatchPilotHarnessRuntime {
@@ -65,7 +65,7 @@ export class PatchPilotHarnessRuntime {
   private readonly model: ModelClientLike;
   private readonly sandboxProvider: SandboxProvider;
   private readonly maxIterations: number;
-  private readonly onEvent?: TrueForgeRuntimeEventListener;
+  private readonly onEvent?: PatchPilotRuntimeEventListener;
   private readonly sessions = new Map<string, SessionRecord>();
 
   constructor(config: HarnessRuntimeConfig) {
@@ -100,15 +100,15 @@ export class PatchPilotHarnessRuntime {
     };
   }
 
-  async listSessionEvents(sessionId: string): Promise<TrueForgeRuntimeEvent[]> {
+  async listSessionEvents(sessionId: string): Promise<PatchPilotRuntimeEvent[]> {
     return this.requireSession(sessionId).allEvents;
   }
 
   async subscribeToTurn(
     sessionId: string,
     turnId: string,
-    onEvent?: TrueForgeRuntimeEventListener
-  ): Promise<TrueForgeRuntimeEvent[]> {
+    onEvent?: PatchPilotRuntimeEventListener
+  ): Promise<PatchPilotRuntimeEvent[]> {
     const session = this.requireSession(sessionId);
     const events = session.eventsByTurn.get(turnId) ?? [];
     for (const event of events) {
@@ -117,7 +117,7 @@ export class PatchPilotHarnessRuntime {
     return events;
   }
 
-  async resolveToolApproval(input: ResolveToolApprovalInput): Promise<TrueForgeTurn> {
+  async resolveToolApproval(input: ResolveToolApprovalInput): Promise<PatchPilotTurn> {
     const session = this.requireSession(input.sessionId);
     const pending = session.pendingApproval;
     if (!pending || pending.toolCallId !== input.toolCallId) {
@@ -155,7 +155,7 @@ export class PatchPilotHarnessRuntime {
     return { id: newTurnId, sessionId: session.id, status: "running" };
   }
 
-  async requestProofContract(sessionId: string): Promise<TrueForgeTurn> {
+  async requestProofContract(sessionId: string): Promise<PatchPilotTurn> {
     const session = this.requireSession(sessionId);
     session.messages.push({ role: "user", content: buildProofContractRecoveryMessage() });
     const turnId = `turn_${randomUUID()}`;
@@ -363,8 +363,8 @@ export class PatchPilotHarnessRuntime {
     });
   }
 
-  private recordEvent(session: SessionRecord, turnId: string, event: TrueForgeRuntimeEvent): void {
-    const sequenced: TrueForgeRuntimeEvent = { ...event, sequenceNumber: session.allEvents.length };
+  private recordEvent(session: SessionRecord, turnId: string, event: PatchPilotRuntimeEvent): void {
+    const sequenced: PatchPilotRuntimeEvent = { ...event, sequenceNumber: session.allEvents.length };
     session.allEvents.push(sequenced);
     const turnEvents = session.eventsByTurn.get(turnId) ?? [];
     turnEvents.push(sequenced);

@@ -48,8 +48,8 @@ describe("PatchPilot production server", () => {
   beforeEach(async () => {
     process.env.GITHUB_WEBHOOK_SECRET = "webhook-secret";
     process.env.APPROVAL_TOKEN = "approval-token";
-    delete process.env.TRUEFORGE_URL;
-    delete process.env.TRUEFORGE_API_KEY;
+    delete process.env.AI_API_KEY;
+    delete process.env.AI_BASE_URL;
     delete process.env.MCP_AUTH_TOKEN;
     delete process.env.PATCHPILOT_REQUIRE_TRIGGER_LABEL;
     delete process.env.PATCHPILOT_TRIGGER_LABEL;
@@ -67,8 +67,8 @@ describe("PatchPilot production server", () => {
   afterEach(async () => {
     delete process.env.GITHUB_WEBHOOK_SECRET;
     delete process.env.APPROVAL_TOKEN;
-    delete process.env.TRUEFORGE_URL;
-    delete process.env.TRUEFORGE_API_KEY;
+    delete process.env.AI_API_KEY;
+    delete process.env.AI_BASE_URL;
     delete process.env.MCP_AUTH_TOKEN;
     delete process.env.PATCHPILOT_REQUIRE_TRIGGER_LABEL;
     delete process.env.PATCHPILOT_TRIGGER_LABEL;
@@ -160,7 +160,7 @@ describe("PatchPilot production server", () => {
 
     expect(response.status).toBe(202);
     expect(body.run.status).toBe("triaging");
-    expect(body.trueForge.status).toBe("not-configured");
+    expect(body.patchPilot.status).toBe("not-configured");
     await expect(readFile(join(dataDir, "webhook-runs.jsonl"), "utf8")).resolves.toContain("Parser crash");
 
     const latest = await fetch(`${baseUrl}/api/runs/latest`).then((latestResponse) => latestResponse.json());
@@ -297,11 +297,11 @@ describe("PatchPilot production server", () => {
     expect((await response.json()).ignored).not.toBe(true);
   });
 
-  it("surfaces a non-recoverable TrueForge provider error without retrying", async () => {
+  it("surfaces a non-recoverable PatchPilot provider error without retrying", async () => {
     const staticDir = await mkdtemp(join(tmpdir(), "patchpilot-static-"));
     const liveDataDir = await mkdtemp(join(tmpdir(), "patchpilot-data-"));
     await writeFile(join(staticDir, "index.html"), "<main>PatchPilot</main>", "utf8");
-    const trueForgeRuntime = {
+    const patchPilotRuntime = {
       startSession: vi.fn().mockResolvedValue({
         session: { id: "session-live-1", title: null },
         turn: { id: "turn-live-1", sessionId: "session-live-1", status: "running" }
@@ -319,7 +319,7 @@ describe("PatchPilot production server", () => {
       createIssueComment: vi.fn().mockResolvedValue({ id: 701, html_url: "https://github.test/issues/20#issuecomment-701" }),
       addLabels: vi.fn().mockResolvedValue(undefined)
     } as any;
-    const server = createPatchPilotServer({ staticDir, dataDir: liveDataDir, trueForgeRuntime, githubClient });
+    const server = createPatchPilotServer({ staticDir, dataDir: liveDataDir, patchPilotRuntime, githubClient });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address() as AddressInfo;
     const isolatedBaseUrl = `http://127.0.0.1:${address.port}`;
@@ -353,7 +353,7 @@ describe("PatchPilot production server", () => {
       const body = await response.json();
 
       expect(response.status).toBe(202);
-      expect(trueForgeRuntime.startSession).toHaveBeenCalledWith({
+      expect(patchPilotRuntime.startSession).toHaveBeenCalledWith({
         repository: "o/r",
         issueUrl: "https://github.test/o/r/issues/20",
         issueTitle: "Parser crash in production",
@@ -362,32 +362,32 @@ describe("PatchPilot production server", () => {
         branchName: "patchpilot/fix-20-866c2789a3"
       });
       expect(body.run.status).toBe("environment-building");
-      expect(body.trueForge.status).toBe("started");
-      expect(body.trueForge.session.id).toBe("session-live-1");
-      expect(trueForgeRuntime.subscribeToTurn).toHaveBeenCalledWith("session-live-1", "turn-live-1", expect.any(Function));
+      expect(body.patchPilot.status).toBe("started");
+      expect(body.patchPilot.session.id).toBe("session-live-1");
+      expect(patchPilotRuntime.subscribeToTurn).toHaveBeenCalledWith("session-live-1", "turn-live-1", expect.any(Function));
 
       let latest: any;
       for (let attempt = 0; attempt < 20; attempt += 1) {
         latest = await fetch(`${isolatedBaseUrl}/api/runs/latest`).then((latestResponse) => latestResponse.json());
-        if (latest.trueForge.status === "completed") {
+        if (latest.patchPilot.status === "completed") {
           break;
         }
         await new Promise((resolve) => setTimeout(resolve, 5));
       }
-      expect(latest.trueForge.status).toBe("completed");
+      expect(latest.patchPilot.status).toBe("completed");
       expect(latest.run.status).toBe("failed");
-      expect(latest.trueForge.error).toContain("response_format unavailable");
-      expect(trueForgeRuntime.requestProofContract).not.toHaveBeenCalled();
-      expect(latest.trueForge.events).toHaveLength(2);
-      expect(latest.trueForge.events.map((event: { type: string }) => event.type)).toEqual(["step.started", "step.done"]);
-      expect(latest.trueForge.events[0]).toMatchObject({
+      expect(latest.patchPilot.error).toContain("response_format unavailable");
+      expect(patchPilotRuntime.requestProofContract).not.toHaveBeenCalled();
+      expect(latest.patchPilot.events).toHaveLength(2);
+      expect(latest.patchPilot.events.map((event: { type: string }) => event.type)).toEqual(["step.started", "step.done"]);
+      expect(latest.patchPilot.events[0]).toMatchObject({
         type: "step.started",
         category: "agent",
-        source: "trueforge"
+        source: "patchpilot"
       });
-      expect(latest.trueForge.events[0].sequenceNumber).toBeUndefined();
-      expect(latest.trueForge.session).toBeUndefined();
-      expect(latest.trueForge.turn).toBeUndefined();
+      expect(latest.patchPilot.events[0].sequenceNumber).toBeUndefined();
+      expect(latest.patchPilot.session).toBeUndefined();
+      expect(latest.patchPilot.turn).toBeUndefined();
       expect(JSON.stringify(latest)).not.toContain("do-not-persist");
       expect(githubClient.createIssueComment).toHaveBeenCalledTimes(2);
       expect(githubClient.createIssueComment.mock.calls[1]?.[3]).toContain("response_format unavailable");
@@ -449,7 +449,7 @@ describe("PatchPilot production server", () => {
       } } }
     ];
     let sessionListCount = 0;
-    const trueForgeRuntime = {
+    const patchPilotRuntime = {
       startSession: vi.fn().mockResolvedValue({
         session: { id: "session-recovery-1", title: null },
         turn: { id: "turn-recovery-1", sessionId: "session-recovery-1", status: "running" }
@@ -482,7 +482,7 @@ describe("PatchPilot production server", () => {
       createIssueComment: vi.fn().mockResolvedValue({ id: 702, html_url: "https://github.test/issues/22#issuecomment-702" }),
       addLabels: vi.fn().mockResolvedValue(undefined)
     } as any;
-    const server = createPatchPilotServer({ staticDir, dataDir: liveDataDir, trueForgeRuntime, githubClient });
+    const server = createPatchPilotServer({ staticDir, dataDir: liveDataDir, patchPilotRuntime, githubClient });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address() as AddressInfo;
     const isolatedBaseUrl = `http://127.0.0.1:${address.port}`;
@@ -521,17 +521,17 @@ describe("PatchPilot production server", () => {
         if (latest.run.status === "awaiting-approval") break;
         await new Promise((resolve) => setTimeout(resolve, 5));
       }
-      expect(trueForgeRuntime.requestProofContract).toHaveBeenCalledTimes(2);
-      expect(trueForgeRuntime.requestProofContract).toHaveBeenCalledWith("session-recovery-1");
-      expect(trueForgeRuntime.subscribeToTurn).toHaveBeenCalledTimes(3);
-      expect(trueForgeRuntime.listSessionEvents).toHaveBeenCalledTimes(3);
+      expect(patchPilotRuntime.requestProofContract).toHaveBeenCalledTimes(2);
+      expect(patchPilotRuntime.requestProofContract).toHaveBeenCalledWith("session-recovery-1");
+      expect(patchPilotRuntime.subscribeToTurn).toHaveBeenCalledTimes(3);
+      expect(patchPilotRuntime.listSessionEvents).toHaveBeenCalledTimes(3);
       expect(latest.run.status).toBe("awaiting-approval");
-      expect(latest.trueForge.status).toBe("paused");
-      expect(latest.trueForge.error).toBeUndefined();
-      expect(latest.trueForge.result.status).toBe("patch-ready");
+      expect(latest.patchPilot.status).toBe("paused");
+      expect(latest.patchPilot.error).toBeUndefined();
+      expect(latest.patchPilot.result.status).toBe("patch-ready");
       const persistedLines = (await readFile(join(liveDataDir, "webhook-runs.jsonl"), "utf8")).trim().split("\n");
       const persisted = JSON.parse(persistedLines.at(-1)!);
-      expect(persisted.trueForge.pendingApproval.turnId).toBe("turn-recovery-3");
+      expect(persisted.patchPilot.pendingApproval.turnId).toBe("turn-recovery-3");
       expect(githubClient.addLabels).toHaveBeenCalledWith("o", "r", 22, ["patchpilot:verified"]);
       expect(githubClient.addLabels).toHaveBeenCalledWith("o", "r", 22, ["patchpilot:awaiting-approval"]);
     } finally {
@@ -539,7 +539,7 @@ describe("PatchPilot production server", () => {
     }
   });
 
-  it("refreshes persisted TrueForge events when the stream omits the final output", async () => {
+  it("refreshes persisted PatchPilot events when the stream omits the final output", async () => {
     const staticDir = await mkdtemp(join(tmpdir(), "patchpilot-static-"));
     const liveDataDir = await mkdtemp(join(tmpdir(), "patchpilot-data-"));
     await writeFile(join(staticDir, "index.html"), "<main>PatchPilot</main>", "utf8");
@@ -550,7 +550,7 @@ describe("PatchPilot production server", () => {
       proof: { before: "3/3 failed", after: "3/3 passed", regressions: "Focused regression passed", attempts: "3/3" },
       candidatePatch: null
     });
-    const trueForgeRuntime = {
+    const patchPilotRuntime = {
       startSession: vi.fn().mockResolvedValue({
         session: { id: "session-refresh-1", title: null },
         turn: { id: "turn-refresh-1", sessionId: "session-refresh-1", status: "running" }
@@ -568,7 +568,7 @@ describe("PatchPilot production server", () => {
       createIssueComment: vi.fn().mockResolvedValue({ id: 703, html_url: "https://github.test/issues/23#issuecomment-703" }),
       addLabels: vi.fn().mockResolvedValue(undefined)
     } as any;
-    const server = createPatchPilotServer({ staticDir, dataDir: liveDataDir, trueForgeRuntime, githubClient });
+    const server = createPatchPilotServer({ staticDir, dataDir: liveDataDir, patchPilotRuntime, githubClient });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address() as AddressInfo;
     const isolatedBaseUrl = `http://127.0.0.1:${address.port}`;
@@ -604,19 +604,19 @@ describe("PatchPilot production server", () => {
       let latest: any;
       for (let attempt = 0; attempt < 20; attempt += 1) {
         latest = await fetch(`${isolatedBaseUrl}/api/runs/latest`).then((latestResponse) => latestResponse.json());
-        if (latest.trueForge.status === "completed") break;
+        if (latest.patchPilot.status === "completed") break;
         await new Promise((resolve) => setTimeout(resolve, 5));
       }
-      expect(trueForgeRuntime.listSessionEvents).toHaveBeenCalledWith("session-refresh-1");
+      expect(patchPilotRuntime.listSessionEvents).toHaveBeenCalledWith("session-refresh-1");
       expect(latest.run.status).toBe("verified");
-      expect(latest.trueForge.result.status).toBe("verified");
+      expect(latest.patchPilot.result.status).toBe("verified");
       expect(githubClient.addLabels).toHaveBeenCalledWith("o", "r", 23, ["patchpilot:verified"]);
     } finally {
       await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
     }
   });
 
-  it("rejects a positive patch result without the mandatory TrueForge approval checkpoint", async () => {
+  it("rejects a positive patch result without the mandatory PatchPilot approval checkpoint", async () => {
     const staticDir = await mkdtemp(join(tmpdir(), "patchpilot-static-"));
     const liveDataDir = await mkdtemp(join(tmpdir(), "patchpilot-data-"));
     await writeFile(join(staticDir, "index.html"), "<main>PatchPilot</main>", "utf8");
@@ -631,7 +631,7 @@ describe("PatchPilot production server", () => {
         files: [{ path: "demo/buggy-parser/src/tokenizer.ts", content: "export const fixed = true;\n" }]
       }
     });
-    const trueForgeRuntime = {
+    const patchPilotRuntime = {
       startSession: vi.fn().mockResolvedValue({
         session: { id: "session-no-checkpoint", title: null },
         turn: { id: "turn-no-checkpoint", sessionId: "session-no-checkpoint", status: "running" }
@@ -648,7 +648,7 @@ describe("PatchPilot production server", () => {
       addLabels: vi.fn().mockResolvedValue(undefined),
       removeLabel: vi.fn().mockResolvedValue(undefined)
     } as any;
-    const server = createPatchPilotServer({ staticDir, dataDir: liveDataDir, trueForgeRuntime, githubClient });
+    const server = createPatchPilotServer({ staticDir, dataDir: liveDataDir, patchPilotRuntime, githubClient });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address() as AddressInfo;
     const isolatedBaseUrl = `http://127.0.0.1:${address.port}`;
@@ -678,7 +678,7 @@ describe("PatchPilot production server", () => {
         await new Promise((resolve) => setTimeout(resolve, 5));
       }
       expect(latest.run.status).toBe("failed");
-      expect(latest.trueForge.error).toContain("native approval checkpoint");
+      expect(latest.patchPilot.error).toContain("native approval checkpoint");
       expect(githubClient.addLabels).not.toHaveBeenCalledWith("o", "r", 24, ["patchpilot:verified"]);
       expect(githubClient.updateIssueComment.mock.calls.at(-1)?.[3]).toContain("complete proof-and-approval contract");
     } finally {
@@ -686,7 +686,7 @@ describe("PatchPilot production server", () => {
     }
   });
 
-  it("persists live proof and resumes the exact TrueForge MCP approval", async () => {
+  it("persists live proof and resumes the exact PatchPilot MCP approval", async () => {
     const staticDir = await mkdtemp(join(tmpdir(), "patchpilot-static-"));
     const liveDataDir = await mkdtemp(join(tmpdir(), "patchpilot-data-"));
     await writeFile(join(staticDir, "index.html"), "<main>PatchPilot</main>", "utf8");
@@ -712,7 +712,7 @@ describe("PatchPilot production server", () => {
       files: [{ path: "src/parser.ts", content: "export const fixed = true;\n" }]
     };
     let approvalSubscriptionAttempts = 0;
-    const trueForgeRuntime = {
+    const patchPilotRuntime = {
       startSession: vi.fn().mockResolvedValue({
         session: { id: "session-proof-1", title: null },
         turn: { id: "turn-proof-1", sessionId: "session-proof-1", status: "running" }
@@ -773,7 +773,7 @@ describe("PatchPilot production server", () => {
       addLabels: vi.fn().mockResolvedValue(undefined),
       updateIssueComment: vi.fn().mockImplementation(async (_owner: string, _repo: string, id: number) => ({ id, html_url: "https://github.test/issues/21#issuecomment-700" }))
     } as any;
-    const server = createPatchPilotServer({ staticDir, dataDir: liveDataDir, trueForgeRuntime, githubClient });
+    const server = createPatchPilotServer({ staticDir, dataDir: liveDataDir, patchPilotRuntime, githubClient });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address() as AddressInfo;
     const isolatedBaseUrl = `http://127.0.0.1:${address.port}`;
@@ -813,8 +813,8 @@ describe("PatchPilot production server", () => {
         await new Promise((resolve) => setTimeout(resolve, 5));
       }
       expect(latest.run.status).toBe("awaiting-approval");
-      expect(latest.trueForge.result.candidatePatch.files[0].path).toBe("src/parser.ts");
-      expect(latest.trueForge.result.proof.before).toContain("[sandbox path]");
+      expect(latest.patchPilot.result.candidatePatch.files[0].path).toBe("src/parser.ts");
+      expect(latest.patchPilot.result.proof.before).toContain("[sandbox path]");
       expect(latest.issueBody).toBe("Trailing escape crashes the parser.");
       expect(JSON.stringify(latest)).not.toContain("/tmp/private/repro.ts");
       expect(JSON.stringify(latest)).not.toContain("fixture-sensitive");
@@ -832,8 +832,8 @@ describe("PatchPilot production server", () => {
       expect(githubClient.addLabels).toHaveBeenCalledWith("o", "r", 21, ["patchpilot:awaiting-approval"]);
       const runRecord = await fetch(`${isolatedBaseUrl}/api/runs/${encodeURIComponent(latest.run.id)}`).then((runResponse) => runResponse.json());
       expect(runRecord.run.id).toBe(latest.run.id);
-      expect(runRecord.trueForge.session).toBeUndefined();
-      expect(runRecord.trueForge.turn).toBeUndefined();
+      expect(runRecord.patchPilot.session).toBeUndefined();
+      expect(runRecord.patchPilot.turn).toBeUndefined();
 
       const approvalPayload = JSON.stringify({
         action: "created",
@@ -859,10 +859,10 @@ describe("PatchPilot production server", () => {
 
       expect(interruptedApproval.status).toBe(502);
       expect(interruptedBody.error).toBe("Approval turn stream disconnected");
-      expect(trueForgeRuntime.resolveToolApproval).toHaveBeenCalledTimes(1);
+      expect(patchPilotRuntime.resolveToolApproval).toHaveBeenCalledTimes(1);
       const interruptedLines = (await readFile(join(liveDataDir, "webhook-runs.jsonl"), "utf8")).trim().split("\n");
       const interruptedRecord = JSON.parse(interruptedLines.at(-1)!);
-      expect(interruptedRecord.trueForge.pendingApproval.approvalTurnId).toBe("turn-approval-1");
+      expect(interruptedRecord.patchPilot.pendingApproval.approvalTurnId).toBe("turn-approval-1");
       const approvalReceiptLines = (await readFile(join(liveDataDir, "approvals.jsonl"), "utf8")).trim().split("\n");
       const writingReceipt = approvalReceiptLines.map((line) => JSON.parse(line)).find((receipt) => receipt.resultStatus === "writing");
       await appendFile(join(liveDataDir, "approvals.jsonl"), `${JSON.stringify(writingReceipt)}\n`, "utf8");
@@ -882,14 +882,14 @@ describe("PatchPilot production server", () => {
       expect(approval.status).toBe(200);
       expect(approvalBody.resultStatus).toBe("pr-created");
       expect(approvalBody.pullRequest.url).toBe("https://github.test/pull/42");
-      expect(trueForgeRuntime.resolveToolApproval).toHaveBeenCalledWith({
+      expect(patchPilotRuntime.resolveToolApproval).toHaveBeenCalledWith({
         sessionId: "session-proof-1",
         previousTurnId: "turn-proof-1",
         threadId: "thread-write-1",
         toolCallId: "call-write-1",
         decision: "allow"
       });
-      expect(trueForgeRuntime.resolveToolApproval).toHaveBeenCalledTimes(1);
+      expect(patchPilotRuntime.resolveToolApproval).toHaveBeenCalledTimes(1);
       const duplicateApproval = await fetch(`${isolatedBaseUrl}/api/github/webhook`, {
         method: "POST",
         headers: {
@@ -901,10 +901,10 @@ describe("PatchPilot production server", () => {
         body: approvalPayload
       });
       expect(duplicateApproval.status).toBe(200);
-      expect(trueForgeRuntime.resolveToolApproval).toHaveBeenCalledTimes(1);
+      expect(patchPilotRuntime.resolveToolApproval).toHaveBeenCalledTimes(1);
       const finalRun = await fetch(`${isolatedBaseUrl}/api/runs/latest`).then((latestResponse) => latestResponse.json());
       expect(finalRun.run.status).toBe("pr-created");
-      expect(finalRun.trueForge.result.pullRequest).toEqual({ number: 42, url: "https://github.test/pull/42" });
+      expect(finalRun.patchPilot.result.pullRequest).toEqual({ number: 42, url: "https://github.test/pull/42" });
       expect(githubClient.createIssueComment).toHaveBeenCalledTimes(1);
       expect(githubClient.updateIssueComment).toHaveBeenCalledTimes(2);
       expect(githubClient.updateIssueComment.mock.calls.at(-1)?.[3]).toContain("Fix proposed");
@@ -938,7 +938,7 @@ describe("PatchPilot production server", () => {
       body: "Verified by PatchPilot.",
       files: [{ path: "src/parser.ts", content: "export const fixed = true;\n" }]
     };
-    const trueForgeRuntime = {
+    const patchPilotRuntime = {
       startSession: vi.fn().mockResolvedValue({
         session: { id: "session-proof-2", title: null },
         turn: { id: "turn-proof-2", sessionId: "session-proof-2", status: "running" }
@@ -980,7 +980,7 @@ describe("PatchPilot production server", () => {
       addLabels: vi.fn().mockResolvedValue(undefined),
       updateIssueComment: vi.fn().mockResolvedValue({ id: 723, html_url: "https://github.test/issues/23#issuecomment-723" })
     } as any;
-    const server = createPatchPilotServer({ staticDir, dataDir: liveDataDir, trueForgeRuntime, githubClient });
+    const server = createPatchPilotServer({ staticDir, dataDir: liveDataDir, patchPilotRuntime, githubClient });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address() as AddressInfo;
     const isolatedBaseUrl = `http://127.0.0.1:${address.port}`;
@@ -1010,8 +1010,8 @@ describe("PatchPilot production server", () => {
         await new Promise((resolve) => setTimeout(resolve, 5));
       }
       expect(latest.run.status).toBe("awaiting-approval");
-      expect(latest.trueForge.pendingApproval).toBeUndefined();
-      expect(latest.trueForge.status).toBe("paused");
+      expect(latest.patchPilot.pendingApproval).toBeUndefined();
+      expect(latest.patchPilot.status).toBe("paused");
     } finally {
       await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
     }
@@ -1200,7 +1200,7 @@ describe("PatchPilot production server", () => {
     } } };
 
     let listAttempts = 0;
-    const trueForgeRuntime = {
+    const patchPilotRuntime = {
       startSession: vi.fn().mockResolvedValue({
         session: { id: "session-rec-1", title: null },
         turn: { id: "turn-rec-1", sessionId: "session-rec-1", status: "running" }
@@ -1222,7 +1222,7 @@ describe("PatchPilot production server", () => {
         listAttempts += 1;
         // First listing attempt fails transiently
         if (listAttempts === 1) {
-          throw new Error("Temporary network timeout from TrueForge API");
+          throw new Error("Temporary network timeout from PatchPilot API");
         }
         if (listAttempts <= 3) {
           return pauseEvents;
@@ -1236,7 +1236,7 @@ describe("PatchPilot production server", () => {
       removeLabel: vi.fn().mockResolvedValue(undefined),
       updateIssueComment: vi.fn().mockImplementation(async (_owner: string, _repo: string, id: number) => ({ id, html_url: "https://github.test/issues/55#issuecomment-888" }))
     } as any;
-    const server = createPatchPilotServer({ staticDir, dataDir: liveDataDir, trueForgeRuntime, githubClient });
+    const server = createPatchPilotServer({ staticDir, dataDir: liveDataDir, patchPilotRuntime, githubClient });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address() as AddressInfo;
     const isolatedBaseUrl = `http://127.0.0.1:${address.port}`;
@@ -1276,7 +1276,7 @@ describe("PatchPilot production server", () => {
         await new Promise((resolve) => setTimeout(resolve, 10));
       }
       expect(latest.run.status).toBe("awaiting-approval");
-      const patchHash = latest.trueForge.result.candidatePatch.hash;
+      const patchHash = latest.patchPilot.result.candidatePatch.hash;
 
       const approval = await fetch(`${isolatedBaseUrl}/api/approvals`, {
         method: "POST",
@@ -1290,7 +1290,7 @@ describe("PatchPilot production server", () => {
 
       const finalRun = await fetch(`${isolatedBaseUrl}/api/runs/latest`).then((latestResponse) => latestResponse.json());
       expect(finalRun.run.status).toBe("pr-created");
-      expect(finalRun.trueForge.result.pullRequest).toEqual({ number: 99, url: "https://github.test/pull/99" });
+      expect(finalRun.patchPilot.result.pullRequest).toEqual({ number: 99, url: "https://github.test/pull/99" });
     } finally {
       await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
     }

@@ -32,7 +32,7 @@ describe("PostgresStore unit tests", () => {
             {
               record: {
                 run: { id: "run-1", status: "awaiting-approval", issue: { issueNumber: 12 } },
-                trueForge: { pendingApproval: { toolCallId: "call_1" } }
+                patchPilot: { pendingApproval: { toolCallId: "call_1" } }
               }
             }
           ]

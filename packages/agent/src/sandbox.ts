@@ -31,7 +31,7 @@ export interface LocalSandboxConfig {
 
 /**
  * Runs commands in a per-session temp directory on the host process, not a
- * containerized environment. This is a functional stand-in for TrueForge's
+ * containerized environment. This is a functional stand-in for PatchPilot's
  * Daytona-provisioned sandbox; swap this provider for a container/VM-backed
  * one (Daytona, Firecracker, Docker) before running against untrusted issues
  * in production, since it does not isolate network or filesystem access

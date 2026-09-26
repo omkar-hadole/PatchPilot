@@ -14,9 +14,9 @@ import type {
   ResolveToolApprovalInput,
   StartPatchPilotSessionInput,
   StartPatchPilotSessionResult,
-  TrueForgeTurn,
-  TrueForgeRuntimeEventListener,
-  TrueForgeRuntimeEvent
+  PatchPilotTurn,
+  PatchPilotRuntimeEventListener,
+  PatchPilotRuntimeEvent
 } from "@patchpilot/agent";
 import { canTransition, createRun, scanIssueText, transitionRun } from "@patchpilot/core";
 import {
@@ -44,7 +44,7 @@ export interface PatchPilotServerOptions {
   staticDir?: string;
   dataDir?: string;
   postgresStore?: PostgresStore;
-  trueForgeRuntime?: PatchPilotSessionStarter;
+  patchPilotRuntime?: PatchPilotSessionStarter;
   mcpHandler?: McpRequestHandler;
   githubClient?: GitHubRestClientLike;
 }
@@ -61,7 +61,7 @@ interface LiveCandidatePatch {
   verifiedAt: string;
 }
 
-interface TrueForgePendingApproval {
+interface PatchPilotPendingApproval {
   turnId: string;
   approvalTurnId?: string;
   threadId: string;
@@ -113,10 +113,10 @@ interface HarnessTraceEvent {
 
 interface PatchPilotSessionStarter {
   startSession(input: StartPatchPilotSessionInput): Promise<StartPatchPilotSessionResult>;
-  requestProofContract?(sessionId: string): Promise<TrueForgeTurn>;
-  resolveToolApproval?(input: ResolveToolApprovalInput): Promise<TrueForgeTurn>;
-  subscribeToTurn?(sessionId: string, turnId: string, onEvent?: TrueForgeRuntimeEventListener): Promise<TrueForgeRuntimeEvent[]>;
-  listSessionEvents?(sessionId: string): Promise<TrueForgeRuntimeEvent[]>;
+  requestProofContract?(sessionId: string): Promise<PatchPilotTurn>;
+  resolveToolApproval?(input: ResolveToolApprovalInput): Promise<PatchPilotTurn>;
+  subscribeToTurn?(sessionId: string, turnId: string, onEvent?: PatchPilotRuntimeEventListener): Promise<PatchPilotRuntimeEvent[]>;
+  listSessionEvents?(sessionId: string): Promise<PatchPilotRuntimeEvent[]>;
 }
 
 interface PersistedWebhookRunRecord {
@@ -134,7 +134,7 @@ interface PersistedWebhookRunRecord {
   lifecycleLabels?: Array<{ name: string; appliedAt?: string; error?: string }>;
   run: ReturnType<typeof createRun>;
   scan: ReturnType<typeof scanIssueText>;
-  trueForge: {
+  patchPilot: {
     status: string;
     reason?: string;
     error?: string;
@@ -144,7 +144,7 @@ interface PersistedWebhookRunRecord {
     provider?: string;
     events?: HarnessTraceEvent[];
     result?: LiveProofResult;
-    pendingApproval?: TrueForgePendingApproval;
+    pendingApproval?: PatchPilotPendingApproval;
   };
 }
 
@@ -160,7 +160,7 @@ export function createPatchPilotServer(options: PatchPilotServerOptions = {}): S
     });
   }
   const githubClient = options.githubClient ?? githubClientFromEnv();
-  const trueForgeRuntime = options.trueForgeRuntime ?? trueForgeRuntimeFromEnv(githubClient);
+  const patchPilotRuntime = options.patchPilotRuntime ?? patchPilotRuntimeFromEnv(githubClient);
   const mcpHandler = options.mcpHandler ?? githubMcpHandlerFromEnv(githubClient);
   const activeIssueTriggers = new Set<string>();
 
@@ -174,12 +174,12 @@ export function createPatchPilotServer(options: PatchPilotServerOptions = {}): S
       }
 
       if (url.pathname === "/api/runs/latest") {
-        await handleLatestRun(request, response, dataDir ? resolve(dataDir) : undefined, trueForgeRuntime, postgresStore);
+        await handleLatestRun(request, response, dataDir ? resolve(dataDir) : undefined, patchPilotRuntime, postgresStore);
         return;
       }
 
       if (url.pathname.startsWith("/api/runs/") && url.pathname !== "/api/runs/latest") {
-        await handleRun(request, response, dataDir ? resolve(dataDir) : undefined, decodeRunId(url.pathname), trueForgeRuntime, postgresStore);
+        await handleRun(request, response, dataDir ? resolve(dataDir) : undefined, decodeRunId(url.pathname), patchPilotRuntime, postgresStore);
         return;
       }
 
@@ -193,7 +193,7 @@ export function createPatchPilotServer(options: PatchPilotServerOptions = {}): S
       }
 
       if (url.pathname === "/api/approvals") {
-        await handleApproval(request, response, dataDir ? resolve(dataDir) : undefined, trueForgeRuntime, githubClient, postgresStore);
+        await handleApproval(request, response, dataDir ? resolve(dataDir) : undefined, patchPilotRuntime, githubClient, postgresStore);
         return;
       }
 
@@ -202,7 +202,7 @@ export function createPatchPilotServer(options: PatchPilotServerOptions = {}): S
           request,
           response,
           dataDir ? resolve(dataDir) : undefined,
-          trueForgeRuntime,
+          patchPilotRuntime,
           githubClient,
           activeIssueTriggers,
           postgresStore
@@ -227,7 +227,7 @@ async function handleGitHubWebhook(
   request: IncomingMessage,
   response: ServerResponse,
   dataDir: string | undefined,
-  trueForgeRuntime: PatchPilotSessionStarter | undefined,
+  patchPilotRuntime: PatchPilotSessionStarter | undefined,
   githubClient: GitHubRestClientLike | undefined,
   activeIssueTriggers: Set<string>,
   postgresStore?: PostgresStore
@@ -273,7 +273,7 @@ async function handleGitHubWebhook(
   }
 
   if (eventName === "issue_comment") {
-    await handleGitHubIssueCommentWebhook(payload, response, dataDir, githubClient, trueForgeRuntime, activeIssueTriggers, postgresStore);
+    await handleGitHubIssueCommentWebhook(payload, response, dataDir, githubClient, patchPilotRuntime, activeIssueTriggers, postgresStore);
     return;
   }
 
@@ -301,7 +301,7 @@ async function handleGitHubWebhook(
     return;
   }
 
-  await processIssueWebhook(webhook, deliveryId, response, dataDir, githubClient, trueForgeRuntime, activeIssueTriggers, isExplicitRetrigger, postgresStore);
+  await processIssueWebhook(webhook, deliveryId, response, dataDir, githubClient, patchPilotRuntime, activeIssueTriggers, isExplicitRetrigger, postgresStore);
 }
 
 async function processIssueWebhook(
@@ -310,7 +310,7 @@ async function processIssueWebhook(
   response: ServerResponse,
   dataDir: string | undefined,
   githubClient: GitHubRestClientLike | undefined,
-  trueForgeRuntime: PatchPilotSessionStarter | undefined,
+  patchPilotRuntime: PatchPilotSessionStarter | undefined,
   activeIssueTriggers: Set<string>,
   isExplicitRetrigger = false,
   postgresStore?: PostgresStore
@@ -359,9 +359,9 @@ async function processIssueWebhook(
     run = transitionRun(
       run,
       scan.safeToExecute ? "triaging" : "rejected",
-      scan.safeToExecute ? "Issue ready for TrueForge triage" : "Issue rejected by security policy"
+      scan.safeToExecute ? "Issue ready for PatchPilot triage" : "Issue rejected by security policy"
     );
-    const orchestration = await startTrueForgeSessionForIssue(run, webhook, deliveryId, scan.safeToExecute, trueForgeRuntime);
+    const orchestration = await startPatchPilotSessionForIssue(run, webhook, deliveryId, scan.safeToExecute, patchPilotRuntime);
     run = orchestration.run;
 
     const record: PersistedWebhookRunRecord = {
@@ -374,7 +374,7 @@ async function processIssueWebhook(
       dashboardUrl: dashboardUrlFor(run.id),
       run,
       scan,
-      trueForge: orchestration.trueForge
+      patchPilot: orchestration.patchPilot
     };
     const labeledRecord = await syncLifecycleLabels(record, githubClient);
     const commentRecord = await appendGitHubComment(labeledRecord, githubClient, "started");
@@ -392,8 +392,8 @@ async function processIssueWebhook(
         console.warn("Could not append to local webhook-runs.jsonl (ignoring if postgres is active):", err);
       }
     }
-    if (orchestration.trueForge.status === "started" && trueForgeRuntime?.subscribeToTurn && (dataDir || postgresStore)) {
-      void monitorTrueForgeTurn(dataDir, commentRecord, trueForgeRuntime, githubClient, postgresStore);
+    if (orchestration.patchPilot.status === "started" && patchPilotRuntime?.subscribeToTurn && (dataDir || postgresStore)) {
+      void monitorPatchPilotTurn(dataDir, commentRecord, patchPilotRuntime, githubClient, postgresStore);
     }
 
     sendJson(response, 202, commentRecord);
@@ -430,7 +430,7 @@ async function handleGitHubIssueCommentWebhook(
   response: ServerResponse,
   dataDir: string | undefined,
   githubClient: GitHubRestClientLike | undefined,
-  trueForgeRuntime: PatchPilotSessionStarter | undefined,
+  patchPilotRuntime: PatchPilotSessionStarter | undefined,
   activeIssueTriggers: Set<string>,
   postgresStore?: PostgresStore
 ): Promise<void> {
@@ -456,7 +456,7 @@ async function handleGitHubIssueCommentWebhook(
       repository: webhook.repository
     };
     const commentDeliveryId = `comment-${createHash("sha256").update(`${webhook.repository.full_name}#${webhook.issue.number}:${Date.now()}`).digest("hex").slice(0, 12)}`;
-    await processIssueWebhook(issueWebhook, commentDeliveryId, response, dataDir, githubClient, trueForgeRuntime, activeIssueTriggers, true, postgresStore);
+    await processIssueWebhook(issueWebhook, commentDeliveryId, response, dataDir, githubClient, patchPilotRuntime, activeIssueTriggers, true, postgresStore);
     return;
   }
 
@@ -513,13 +513,13 @@ async function handleGitHubIssueCommentWebhook(
     return;
   }
 
-  const candidateHash = liveRecord.trueForge.result?.candidatePatch?.hash;
+  const candidateHash = liveRecord.patchPilot.result?.candidatePatch?.hash;
   const patchHash = command.patchHash ?? candidateHash;
   if (!patchHash) {
     sendJson(response, 409, { error: "No approved candidate patch is available for this issue" });
     return;
   }
-  const result = await executeApproval(dataDir, liveRecord.run.id, "approve-pr", patchHash, trueForgeRuntime, githubClient, postgresStore);
+  const result = await executeApproval(dataDir, liveRecord.run.id, "approve-pr", patchHash, patchPilotRuntime, githubClient, postgresStore);
   sendJson(response, result.statusCode, result.body);
 }
 
@@ -527,7 +527,7 @@ async function handleLatestRun(
   request: IncomingMessage,
   response: ServerResponse,
   dataDir: string | undefined,
-  trueForgeRuntime: PatchPilotSessionStarter | undefined,
+  patchPilotRuntime: PatchPilotSessionStarter | undefined,
   postgresStore?: PostgresStore
 ): Promise<void> {
   if (request.method !== "GET") {
@@ -552,7 +552,7 @@ async function handleLatestRun(
     return;
   }
 
-  const refreshed = await refreshLegacyHarnessTrace(dataDir, latest, trueForgeRuntime);
+  const refreshed = await refreshLegacyHarnessTrace(dataDir, latest, patchPilotRuntime);
   sendJson(response, 200, publicRunPayload(hydratePersistedPullRequest(ensureDashboardUrl(refreshed))));
 }
 
@@ -561,7 +561,7 @@ async function handleRun(
   response: ServerResponse,
   dataDir: string | undefined,
   runId: string,
-  trueForgeRuntime: PatchPilotSessionStarter | undefined,
+  patchPilotRuntime: PatchPilotSessionStarter | undefined,
   postgresStore?: PostgresStore
 ): Promise<void> {
   if (request.method !== "GET") {
@@ -575,12 +575,12 @@ async function handleRun(
     return;
   }
 
-  const refreshed = await refreshLegacyHarnessTrace(dataDir, record, trueForgeRuntime);
+  const refreshed = await refreshLegacyHarnessTrace(dataDir, record, patchPilotRuntime);
   sendJson(response, 200, publicRunPayload(hydratePersistedPullRequest(ensureDashboardUrl(refreshed))));
 }
 
 function publicRunPayload(value: unknown): unknown {
-  if (!isRecord(value) || !isRecord(value.trueForge)) return value;
+  if (!isRecord(value) || !isRecord(value.patchPilot)) return value;
 
   const publicRun = isRecord(value.run) && Array.isArray(value.run.events)
     ? {
@@ -595,36 +595,36 @@ function publicRunPayload(value: unknown): unknown {
         })
       }
     : value.run;
-  const { session: _session, turn: _turn, pendingApproval: _pendingApproval, ...trueForge } = value.trueForge;
-  const result = isRecord(trueForge.result)
+  const { session: _session, turn: _turn, pendingApproval: _pendingApproval, ...patchPilot } = value.patchPilot;
+  const result = isRecord(patchPilot.result)
     ? {
-        ...trueForge.result,
-        ...(typeof trueForge.result.kind === "string" ? { kind: "patchpilot.result" } : {}),
-        ...(typeof trueForge.result.summary === "string" ? { summary: safePublicMarkdown(trueForge.result.summary) } : {}),
-        ...(typeof trueForge.result.rootCauseSummary === "string" ? { rootCauseSummary: safePublicMarkdown(trueForge.result.rootCauseSummary) } : {}),
-        ...(typeof trueForge.result.proposedFixSummary === "string" ? { proposedFixSummary: safePublicMarkdown(trueForge.result.proposedFixSummary) } : {}),
-        ...(isRecord(trueForge.result.proof)
+        ...patchPilot.result,
+        ...(typeof patchPilot.result.kind === "string" ? { kind: "patchpilot.result" } : {}),
+        ...(typeof patchPilot.result.summary === "string" ? { summary: safePublicMarkdown(patchPilot.result.summary) } : {}),
+        ...(typeof patchPilot.result.rootCauseSummary === "string" ? { rootCauseSummary: safePublicMarkdown(patchPilot.result.rootCauseSummary) } : {}),
+        ...(typeof patchPilot.result.proposedFixSummary === "string" ? { proposedFixSummary: safePublicMarkdown(patchPilot.result.proposedFixSummary) } : {}),
+        ...(isRecord(patchPilot.result.proof)
           ? {
               proof: Object.fromEntries(
-                Object.entries(trueForge.result.proof).map(([key, field]) => [key, typeof field === "string" ? safePublicMarkdown(field) : field])
+                Object.entries(patchPilot.result.proof).map(([key, field]) => [key, typeof field === "string" ? safePublicMarkdown(field) : field])
               )
             }
           : {}),
-        ...(isRecord(trueForge.result.candidatePatch) && typeof trueForge.result.candidatePatch.body === "string"
+        ...(isRecord(patchPilot.result.candidatePatch) && typeof patchPilot.result.candidatePatch.body === "string"
           ? {
               candidatePatch: {
-                ...trueForge.result.candidatePatch,
-                body: safePublicMarkdown(trueForge.result.candidatePatch.body),
-                ...(typeof trueForge.result.candidatePatch.branchName === "string"
-                  ? { branchName: normalizePublicBranchName(trueForge.result.candidatePatch.branchName) }
+                ...patchPilot.result.candidatePatch,
+                body: safePublicMarkdown(patchPilot.result.candidatePatch.body),
+                ...(typeof patchPilot.result.candidatePatch.branchName === "string"
+                  ? { branchName: normalizePublicBranchName(patchPilot.result.candidatePatch.branchName) }
                   : {})
               }
             }
           : {})
       }
-    : trueForge.result;
-  const events = Array.isArray(trueForge.events)
-    ? trueForge.events.map((event, index) => {
+    : patchPilot.result;
+  const events = Array.isArray(patchPilot.events)
+    ? patchPilot.events.map((event, index) => {
         if (!isRecord(event)) return event;
         const { sandboxId: _sandboxId, sequenceNumber: _sequenceNumber, mcpServer: _mcpServer, ...publicEvent } = event;
         return {
@@ -644,7 +644,7 @@ function publicRunPayload(value: unknown): unknown {
             : {})
         };
       })
-    : trueForge.events;
+    : patchPilot.events;
 
   const normalizeLabel = (label: unknown, fallbackName: string) => isRecord(label)
     ? { ...label, name: fallbackName }
@@ -660,7 +660,7 @@ function publicRunPayload(value: unknown): unknown {
     ...(typeof value.issueTitle === "string" ? { issueTitle: safePublicMarkdown(value.issueTitle) } : {}),
     ...(typeof value.issueBody === "string" ? { issueBody: safePublicMarkdown(value.issueBody) } : {}),
     run: publicRun,
-    trueForge: { ...trueForge, result, events },
+    patchPilot: { ...patchPilot, result, events },
     verifiedLabel: normalizeLabel(value.verifiedLabel, "patchpilot:verified"),
     approvalLabel: normalizeLabel(value.approvalLabel, "patchpilot:awaiting-approval"),
     lifecycleLabels
@@ -711,34 +711,34 @@ function decodeRunId(pathname: string): string {
 async function refreshLegacyHarnessTrace(
   dataDir: string | undefined,
   value: unknown,
-  trueForgeRuntime: PatchPilotSessionStarter | undefined
+  patchPilotRuntime: PatchPilotSessionStarter | undefined
 ): Promise<unknown> {
-  if (!dataDir || !trueForgeRuntime?.listSessionEvents || !isRecord(value) || !isRecord(value.trueForge)) {
+  if (!dataDir || !patchPilotRuntime?.listSessionEvents || !isRecord(value) || !isRecord(value.patchPilot)) {
     return value;
   }
 
-  const session = isRecord(value.trueForge.session) && typeof value.trueForge.session.id === "string"
-    ? value.trueForge.session.id
+  const session = isRecord(value.patchPilot.session) && typeof value.patchPilot.session.id === "string"
+    ? value.patchPilot.session.id
     : undefined;
-  const currentEvents = Array.isArray(value.trueForge.events) ? value.trueForge.events : [];
+  const currentEvents = Array.isArray(value.patchPilot.events) ? value.patchPilot.events : [];
   const hasRichTrace = currentEvents.some((event) => isRecord(event) && typeof event.category === "string");
-  const needsMetadata = typeof value.trueForge.model !== "string" || typeof value.trueForge.provider !== "string";
+  const needsMetadata = typeof value.patchPilot.model !== "string" || typeof value.patchPilot.provider !== "string";
   if (!session || (!needsMetadata && hasRichTrace)) {
     return value;
   }
 
   try {
-    const events = hasRichTrace ? [] : await trueForgeRuntime.listSessionEvents(session);
-    const projected = hasRichTrace ? [] : events.flatMap((event, index) => projectTrueForgeEvent(event, index));
+    const events = hasRichTrace ? [] : await patchPilotRuntime.listSessionEvents(session);
+    const projected = hasRichTrace ? [] : events.flatMap((event, index) => projectPatchPilotEvent(event, index));
     if (!hasRichTrace && projected.length === 0 && !needsMetadata) return value;
     const updated = {
       ...value,
-      trueForge: {
-        ...value.trueForge,
-        ...(typeof value.trueForge.model === "string"
+      patchPilot: {
+        ...value.patchPilot,
+        ...(typeof value.patchPilot.model === "string"
           ? {}
           : { model: process.env.AI_MODEL ?? process.env.MODEL_NAME ?? "configured model" }),
-        ...(typeof value.trueForge.provider === "string"
+        ...(typeof value.patchPilot.provider === "string"
           ? {}
           : { provider: process.env.AI_BASE_URL ?? "openai-compatible" }),
         ...(hasRichTrace ? {} : { events: mergeHarnessEvents([], projected) })
@@ -747,17 +747,17 @@ async function refreshLegacyHarnessTrace(
     await appendUpdatedLiveRecord(dataDir, updated);
     return updated;
   } catch (error) {
-    console.error("Legacy TrueForge trace refresh failed", error);
+    console.error("Legacy PatchPilot trace refresh failed", error);
     return value;
   }
 }
 
 function hydratePersistedPullRequest(value: unknown): unknown {
-  if (!isRecord(value) || !isRecord(value.run) || value.run.status !== "pr-created" || !isRecord(value.trueForge)) {
+  if (!isRecord(value) || !isRecord(value.run) || value.run.status !== "pr-created" || !isRecord(value.patchPilot)) {
     return value;
   }
 
-  const result = isRecord(value.trueForge.result) ? value.trueForge.result : {};
+  const result = isRecord(value.patchPilot.result) ? value.patchPilot.result : {};
   if (isPullRequest(result.pullRequest)) {
     return value;
   }
@@ -780,8 +780,8 @@ function hydratePersistedPullRequest(value: unknown): unknown {
 
   return {
     ...value,
-    trueForge: {
-      ...value.trueForge,
+    patchPilot: {
+      ...value.patchPilot,
       result: { ...result, pullRequest }
     }
   };
@@ -798,27 +798,27 @@ function isPullRequest(value: unknown): value is { number: number; url: string }
   return isRecord(value) && typeof value.number === "number" && Number.isInteger(value.number) && value.number > 0 && typeof value.url === "string";
 }
 
-async function startTrueForgeSessionForIssue(
+async function startPatchPilotSessionForIssue(
   run: ReturnType<typeof createRun>,
   webhook: ReturnType<typeof parseIssueWebhook>,
   deliveryId: string,
   safeToExecute: boolean,
-  trueForgeRuntime: PatchPilotSessionStarter | undefined
+  patchPilotRuntime: PatchPilotSessionStarter | undefined
 ) {
   if (!safeToExecute) {
     return {
       run,
-      trueForge: {
+      patchPilot: {
         status: "skipped",
         reason: "Issue was rejected by security policy"
       }
     };
   }
 
-  if (!trueForgeRuntime) {
+  if (!patchPilotRuntime) {
     return {
       run,
-      trueForge: {
+      patchPilot: {
         status: "not-configured",
         reason: "AI_API_KEY and GITHUB_TOKEN are required before live orchestration can start"
       }
@@ -826,7 +826,7 @@ async function startTrueForgeSessionForIssue(
   }
 
   try {
-    const result = await trueForgeRuntime.startSession({
+    const result = await patchPilotRuntime.startSession({
       repository: webhook.repository.full_name,
       issueUrl: webhook.issue.html_url,
       issueTitle: webhook.issue.title,
@@ -836,14 +836,14 @@ async function startTrueForgeSessionForIssue(
     });
 
     return {
-      run: transitionRun(run, "environment-building", "TrueForge session started", {
+      run: transitionRun(run, "environment-building", "PatchPilot session started", {
         evidence: {
           sessionId: result.session.id,
           turnId: result.turn.id,
           turnStatus: result.turn.status
         }
       }),
-      trueForge: {
+      patchPilot: {
         status: "started",
         session: result.session,
         turn: result.turn,
@@ -853,14 +853,14 @@ async function startTrueForgeSessionForIssue(
     };
   } catch (error) {
     return {
-      run: transitionRun(run, "failed", "TrueForge session start failed", {
+      run: transitionRun(run, "failed", "PatchPilot session start failed", {
         evidence: {
-          error: error instanceof Error ? error.message : "Unknown TrueForge error"
+          error: error instanceof Error ? error.message : "Unknown PatchPilot error"
         }
       }),
-      trueForge: {
+      patchPilot: {
         status: "failed",
-        error: error instanceof Error ? error.message : "Unknown TrueForge error"
+        error: error instanceof Error ? error.message : "Unknown PatchPilot error"
       }
     };
   }
@@ -870,7 +870,7 @@ async function handleApproval(
   request: IncomingMessage,
   response: ServerResponse,
   dataDir: string | undefined,
-  trueForgeRuntime: PatchPilotSessionStarter | undefined,
+  patchPilotRuntime: PatchPilotSessionStarter | undefined,
   githubClient: GitHubRestClientLike | undefined,
   postgresStore?: PostgresStore
 ): Promise<void> {
@@ -899,7 +899,7 @@ async function handleApproval(
   const actionId = expectApprovalAction(payload.actionId);
   const runId = expectString(payload.runId, "runId");
   const patchHash = expectString(payload.patchHash, "patchHash");
-  const result = await executeApproval(dataDir, runId, actionId, patchHash, trueForgeRuntime, githubClient, postgresStore);
+  const result = await executeApproval(dataDir, runId, actionId, patchHash, patchPilotRuntime, githubClient, postgresStore);
   sendJson(response, result.statusCode, result.body);
 }
 
@@ -913,7 +913,7 @@ async function executeApproval(
   runId: string,
   actionId: ApprovalActionId,
   patchHash: string,
-  trueForgeRuntime: PatchPilotSessionStarter | undefined,
+  patchPilotRuntime: PatchPilotSessionStarter | undefined,
   githubClient: GitHubRestClientLike | undefined,
   postgresStore?: PostgresStore
 ): Promise<ApprovalExecutionResult> {
@@ -922,13 +922,13 @@ async function executeApproval(
     return { statusCode: 404, body: { error: "Persisted run not found" } };
   }
 
-  const candidatePatch = liveRecord.trueForge.result?.candidatePatch;
+  const candidatePatch = liveRecord.patchPilot.result?.candidatePatch;
   if (!candidatePatch || candidatePatch.hash !== patchHash || !Array.isArray(candidatePatch.files) || candidatePatch.files.length === 0) {
     return { statusCode: 409, body: { error: "Approval payload has no valid patch files" } };
   }
   const previousReceipt = await findApprovalReceipt(dataDir, runId, actionId, patchHash, postgresStore);
   const canReconcilePersistedApproval = Boolean(
-    actionId === "approve-pr" && liveRecord.trueForge.pendingApproval?.approvalTurnId
+    actionId === "approve-pr" && liveRecord.patchPilot.pendingApproval?.approvalTurnId
   );
   if (previousReceipt?.resultStatus === "writing" && !canReconcilePersistedApproval) {
     return { statusCode: 409, body: { error: "This approval is already being processed" } };
@@ -946,42 +946,42 @@ async function executeApproval(
 
   if (actionId !== "approve-pr") {
     let run = liveRecord.run;
-    let trueForge = liveRecord.trueForge;
+    let patchPilot = liveRecord.patchPilot;
     if (actionId === "reject-run" && canTransition(run.status, "rejected")) {
       run = transitionRun(run, "rejected", "Maintainer rejected the live candidate patch");
     }
     if (
       actionId === "reject-run" &&
-      liveRecord.trueForge.pendingApproval &&
-      liveRecord.trueForge.session?.id &&
-      trueForgeRuntime?.resolveToolApproval
+      liveRecord.patchPilot.pendingApproval &&
+      liveRecord.patchPilot.session?.id &&
+      patchPilotRuntime?.resolveToolApproval
     ) {
       try {
-        const denialTurn = await trueForgeRuntime.resolveToolApproval({
-          sessionId: liveRecord.trueForge.session.id,
-          previousTurnId: liveRecord.trueForge.pendingApproval.turnId,
-          threadId: liveRecord.trueForge.pendingApproval.threadId,
-          toolCallId: liveRecord.trueForge.pendingApproval.toolCallId,
+        const denialTurn = await patchPilotRuntime.resolveToolApproval({
+          sessionId: liveRecord.patchPilot.session.id,
+          previousTurnId: liveRecord.patchPilot.pendingApproval.turnId,
+          threadId: liveRecord.patchPilot.pendingApproval.threadId,
+          toolCallId: liveRecord.patchPilot.pendingApproval.toolCallId,
           decision: "deny",
           reason: "Maintainer rejected the candidate patch"
         });
-        const denialEvents = trueForgeRuntime.subscribeToTurn
-          ? await trueForgeRuntime.subscribeToTurn(liveRecord.trueForge.session.id, denialTurn.id)
+        const denialEvents = patchPilotRuntime.subscribeToTurn
+          ? await patchPilotRuntime.subscribeToTurn(liveRecord.patchPilot.session.id, denialTurn.id)
           : [];
-        trueForge = {
-          ...trueForge,
+        patchPilot = {
+          ...patchPilot,
           status: "completed",
           turn: denialTurn,
           pendingApproval: undefined,
           events: mergeHarnessEvents(
-            trueForge.events ?? [],
-            denialEvents.flatMap((event, index) => projectTrueForgeEvent(event, index))
+            patchPilot.events ?? [],
+            denialEvents.flatMap((event, index) => projectPatchPilotEvent(event, index))
           )
         };
       } catch (error) {
         return {
           statusCode: 502,
-          body: { error: error instanceof Error ? error.message : "TrueForge rejection resume failed" }
+          body: { error: error instanceof Error ? error.message : "PatchPilot rejection resume failed" }
         };
       }
     }
@@ -990,9 +990,9 @@ async function executeApproval(
     const baseRecord: PersistedWebhookRunRecord = {
       ...liveRecord,
       run,
-      trueForge: {
-        ...trueForge,
-        events: mergeHarnessEvents(trueForge.events ?? [], [{
+      patchPilot: {
+        ...patchPilot,
+        events: mergeHarnessEvents(patchPilot.events ?? [], [{
           id: `approval:${runId}:${actionId}`,
           at: receipt.savedAt,
           type: "approval.received",
@@ -1013,18 +1013,18 @@ async function executeApproval(
     return { statusCode: 200, body: receipt };
   }
 
-  const pendingApproval = liveRecord.trueForge.pendingApproval;
-  const sessionId = liveRecord.trueForge.session?.id;
+  const pendingApproval = liveRecord.patchPilot.pendingApproval;
+  const sessionId = liveRecord.patchPilot.session?.id;
 
   if (!pendingApproval) {
-    return { statusCode: 409, body: { error: "TrueForge did not return the mandatory native approval checkpoint" } };
+    return { statusCode: 409, body: { error: "PatchPilot did not return the mandatory native approval checkpoint" } };
   }
 
   if (pendingApproval.payloadHash !== candidatePatch.hash) {
-    return { statusCode: 409, body: { error: "TrueForge is not waiting on this exact candidate patch" } };
+    return { statusCode: 409, body: { error: "PatchPilot is not waiting on this exact candidate patch" } };
   }
-  if (!sessionId || !trueForgeRuntime?.resolveToolApproval || !trueForgeRuntime.subscribeToTurn) {
-    return { statusCode: 503, body: { error: "TrueForge approval resume is not configured" } };
+  if (!sessionId || !patchPilotRuntime?.resolveToolApproval || !patchPilotRuntime.subscribeToTurn) {
+    return { statusCode: 503, body: { error: "PatchPilot approval resume is not configured" } };
   }
 
   const writingReceipt = buildApprovalReceipt(
@@ -1032,13 +1032,13 @@ async function executeApproval(
     actionId,
     patchHash,
     "writing",
-    "Approval accepted; resuming the paused TrueForge GitHub write"
+    "Approval accepted; resuming the paused PatchPilot GitHub write"
   );
   await appendApprovalReceipt(dataDir, writingReceipt, postgresStore);
 
   let approvalRecord = liveRecord;
-  let approvalTurn: TrueForgeTurn;
-  let approvalEvents: TrueForgeRuntimeEvent[];
+  let approvalTurn: PatchPilotTurn;
+  let approvalEvents: PatchPilotRuntimeEvent[];
   try {
     if (pendingApproval.approvalTurnId) {
       approvalTurn = {
@@ -1047,7 +1047,7 @@ async function executeApproval(
         status: "running"
       };
     } else {
-      approvalTurn = await trueForgeRuntime.resolveToolApproval({
+      approvalTurn = await patchPilotRuntime.resolveToolApproval({
         sessionId,
         previousTurnId: pendingApproval.turnId,
         threadId: pendingApproval.threadId,
@@ -1056,8 +1056,8 @@ async function executeApproval(
       });
       approvalRecord = {
         ...liveRecord,
-        trueForge: {
-          ...liveRecord.trueForge,
+        patchPilot: {
+          ...liveRecord.patchPilot,
           turn: approvalTurn,
           pendingApproval: {
             ...pendingApproval,
@@ -1068,12 +1068,12 @@ async function executeApproval(
       await appendUpdatedLiveRecord(dataDir, approvalRecord, postgresStore);
     }
     approvalEvents = await reconcileSessionEvents({
-      trueForgeRuntime,
+      patchPilotRuntime,
       sessionId,
       turnId: approvalTurn.id,
       isSettled: (evts) => {
         try {
-          parsePullRequestFromTrueForgeEvents(evts, pendingApproval.toolCallId);
+          parsePullRequestFromPatchPilotEvents(evts, pendingApproval.toolCallId);
           return true;
         } catch {
           return false;
@@ -1088,7 +1088,7 @@ async function executeApproval(
       actionId,
       patchHash,
       "write-failed",
-      error instanceof Error ? error.message : "TrueForge approval resume failed"
+      error instanceof Error ? error.message : "PatchPilot approval resume failed"
     );
     await appendApprovalReceipt(dataDir, failedReceipt, postgresStore);
     return { statusCode: 502, body: { error: failedReceipt.message } };
@@ -1096,14 +1096,14 @@ async function executeApproval(
 
   let pullRequest: { number: number; url: string };
   try {
-    pullRequest = parsePullRequestFromTrueForgeEvents(approvalEvents, pendingApproval.toolCallId);
+    pullRequest = parsePullRequestFromPatchPilotEvents(approvalEvents, pendingApproval.toolCallId);
   } catch (error) {
     const failedReceipt = buildApprovalReceipt(
       runId,
       actionId,
       patchHash,
       "write-failed",
-      error instanceof Error ? error.message : "TrueForge did not return a pull request receipt"
+      error instanceof Error ? error.message : "PatchPilot did not return a pull request receipt"
     );
     await appendApprovalReceipt(dataDir, failedReceipt, postgresStore);
     return { statusCode: 502, body: { error: failedReceipt.message } };
@@ -1120,13 +1120,13 @@ async function executeApproval(
   const updatedRecord: PersistedWebhookRunRecord = {
     ...approvalRecord,
     run,
-    trueForge: {
-      ...approvalRecord.trueForge,
+    patchPilot: {
+      ...approvalRecord.patchPilot,
       status: "completed",
       turn: approvalTurn,
       pendingApproval: undefined,
-      events: mergeHarnessEvents(approvalRecord.trueForge.events ?? [], [
-        ...approvalEvents.flatMap((event, index) => projectTrueForgeEvent(event, index)),
+      events: mergeHarnessEvents(approvalRecord.patchPilot.events ?? [], [
+        ...approvalEvents.flatMap((event, index) => projectPatchPilotEvent(event, index)),
         {
           id: `approval:${runId}:${actionId}`,
           at: new Date().toISOString(),
@@ -1134,15 +1134,15 @@ async function executeApproval(
           category: "approval",
           source: "patchpilot",
           status: "passed",
-          summary: "Maintainer approval resumed the TrueForge GitHub write",
+          summary: "Maintainer approval resumed the PatchPilot GitHub write",
           toolName: "create_fix_pull_request",
           target: `${approvalRecord.run.issue.owner}/${approvalRecord.run.issue.repo}`,
           artifact: `draft PR #${pullRequest.number}`
         }
       ]),
       result: {
-        ...approvalRecord.trueForge.result!,
-        summary: `${approvalRecord.trueForge.result?.summary ?? "Verified candidate patch"} Draft PR created: ${pullRequest.url}`,
+        ...approvalRecord.patchPilot.result!,
+        summary: `${approvalRecord.patchPilot.result?.summary ?? "Verified candidate patch"} Draft PR created: ${pullRequest.url}`,
         pullRequest
       }
     }
@@ -1245,7 +1245,7 @@ function desiredLifecycleLabels(record: PersistedWebhookRunRecord): string[] {
   if (record.run.status === "awaiting-approval") return [];
   if (record.run.status === "needs-info") return ["patchpilot:needs-info"];
   if (record.run.status === "not-reproduced") return ["patchpilot:not-reproduced"];
-  if (record.run.status === "triaging" || record.trueForge.status === "started") return ["patchpilot:triaging"];
+  if (record.run.status === "triaging" || record.patchPilot.status === "started") return ["patchpilot:triaging"];
   return [];
 }
 
@@ -1295,7 +1295,7 @@ async function applyVerifiedLabel(
   record: PersistedWebhookRunRecord,
   githubClient: GitHubRestClientLike | undefined
 ): Promise<PersistedWebhookRunRecord> {
-  if (!githubClient || record.verifiedLabel || !hasGenuineProof(record.trueForge.result)) {
+  if (!githubClient || record.verifiedLabel || !hasGenuineProof(record.patchPilot.result)) {
     return record;
   }
 
@@ -1338,7 +1338,7 @@ async function applyAwaitingApprovalLabel(
     !githubClient ||
     record.approvalLabel ||
     record.run.status !== "awaiting-approval" ||
-    !hasGenuineProof(record.trueForge.result)
+    !hasGenuineProof(record.patchPilot.result)
   ) {
     return record;
   }
@@ -1506,7 +1506,7 @@ async function appendGitHubComment(
 
 export function buildGitHubStatusComment(record: PersistedWebhookRunRecord, kind: GitHubCommentKind): string {
   const status = githubCommentStatus(record);
-  const result = record.trueForge.result;
+  const result = record.patchPilot.result;
   const pullRequest = result?.pullRequest;
   const reviewUrl = record.dashboardUrl ? `${record.dashboardUrl.replace(/\/$/, "")}/review` : "#";
   const runUrl = record.dashboardUrl ?? "#";
@@ -1571,7 +1571,7 @@ export function buildGitHubStatusComment(record: PersistedWebhookRunRecord, kind
     if (record.run.status === "awaiting-approval") {
       lines.push(
         "",
-        "> ⏸ **TrueForge is paused. No branch, commit, or pull request has been created.**",
+        "> ⏸ **PatchPilot is paused. No branch, commit, or pull request has been created.**",
         "",
         `**[Review evidence & approve patch →](${reviewUrl})**`
       );
@@ -1592,7 +1592,7 @@ export function buildGitHubStatusComment(record: PersistedWebhookRunRecord, kind
       `**[View verification evidence →](${runUrl})**`
     );
   } else if (record.run.status === "failed") {
-    const failureReason = record.trueForge.error ?? record.run.events?.slice(-1)[0]?.message ?? "TrueForge completed without a valid proof contract.";
+    const failureReason = record.patchPilot.error ?? record.run.events?.slice(-1)[0]?.message ?? "PatchPilot completed without a valid proof contract.";
     lines.push(
       "",
       "> The run did not produce a complete proof-and-approval contract. No verified label or repository mutation was made.",
@@ -1675,7 +1675,7 @@ function safeCodeText(value: string, maxBytes: number): string {
 }
 
 function commentUpdateLabel(kind: GitHubCommentKind): string {
-  if (kind === "started") return "TrueForge handoff started";
+  if (kind === "started") return "PatchPilot handoff started";
   if (kind === "completed") return "Proof processing completed";
   if (kind === "failed") return "Run stopped";
   return "Maintainer decision recorded";
@@ -1701,7 +1701,7 @@ function githubCommentStatus(record: PersistedWebhookRunRecord): { label: string
     return { label: "Not reproduced", detail: "The reported failure was not observed in the investigated environment." };
   }
   if (record.run.status === "awaiting-approval") {
-    return { label: "Patch ready for review", detail: "Verified evidence is ready; TrueForge is paused before GitHub writes." };
+    return { label: "Patch ready for review", detail: "Verified evidence is ready; PatchPilot is paused before GitHub writes." };
   }
   if (record.run.status === "patch-ready" || record.run.status === "verified") {
     return { label: "Verified", detail: "The reported failure is backed by executable evidence." };
@@ -1710,16 +1710,16 @@ function githubCommentStatus(record: PersistedWebhookRunRecord): { label: string
     return { label: "Run rejected", detail: "The run was stopped before repository mutation." };
   }
   if (record.run.status === "failed") {
-    return { label: "Run failed", detail: record.trueForge.error ?? "TrueForge did not complete successfully." };
+    return { label: "Run failed", detail: record.patchPilot.error ?? "PatchPilot did not complete successfully." };
   }
-  if (record.trueForge.status === "started") {
+  if (record.patchPilot.status === "started") {
     if (record.run.status === "reproducing") {
-      return { label: "Reproducing", detail: "TrueForge is running the reported scenario in an isolated environment." };
+      return { label: "Reproducing", detail: "PatchPilot is running the reported scenario in an isolated environment." };
     }
     if (record.run.status === "environment-building") {
-      return { label: "Environment building", detail: "TrueForge is preparing an isolated environment for reproduction." };
+      return { label: "Environment building", detail: "PatchPilot is preparing an isolated environment for reproduction." };
     }
-    return { label: "Investigating", detail: "TrueForge is inspecting the issue and collecting executable evidence." };
+    return { label: "Investigating", detail: "PatchPilot is inspecting the issue and collecting executable evidence." };
   }
   return { label: "Investigation queued", detail: "PatchPilot accepted the signed issue and is preparing the investigation." };
 }
@@ -1777,7 +1777,7 @@ async function findLatestAwaitingRunByIssue(
         if (
           record.repository === repository &&
           record.run?.issue.issueNumber === issueNumber &&
-          (record.run.status === "awaiting-approval" || Boolean(record.trueForge?.pendingApproval)) &&
+          (record.run.status === "awaiting-approval" || Boolean(record.patchPilot?.pendingApproval)) &&
           (!match || Date.parse(record.run.createdAt) > Date.parse(match.run.createdAt))
         ) {
           match = record;
@@ -1829,8 +1829,8 @@ async function findApprovalReceipt(
   }
 }
 
-function parsePullRequestFromTrueForgeEvents(
-  events: TrueForgeRuntimeEvent[],
+function parsePullRequestFromPatchPilotEvents(
+  events: PatchPilotRuntimeEvent[],
   toolCallId: string
 ): { number: number; url: string } {
   for (const event of [...events].reverse()) {
@@ -1842,7 +1842,7 @@ function parsePullRequestFromTrueForgeEvents(
     const pullRequest = findPullRequest(raw.content);
     if (pullRequest) return pullRequest;
   }
-  throw new Error("TrueForge did not return a pull request receipt for the approved tool call");
+  throw new Error("PatchPilot did not return a pull request receipt for the approved tool call");
 }
 
 function findPullRequest(value: unknown, depth = 0): { number: number; url: string } | undefined {
@@ -2187,11 +2187,11 @@ function receivedAtTimestamp(value: unknown): number {
   return Number.isFinite(timestamp) ? timestamp : Number.NEGATIVE_INFINITY;
 }
 
-function isTrueForgeTurnSettled(events: TrueForgeRuntimeEvent[]): boolean {
+function isPatchPilotTurnSettled(events: PatchPilotRuntimeEvent[]): boolean {
   return events.some((event) => event.type === "turn.done" || event.type === "tool.approval_required");
 }
 
-function trueForgeTurnError(events: TrueForgeRuntimeEvent[]): string | undefined {
+function patchPilotTurnError(events: PatchPilotRuntimeEvent[]): string | undefined {
   for (const event of [...events].reverse()) {
     if (event.type !== "turn.done") continue;
     const raw = unwrapRuntimeEvent(event.raw);
@@ -2199,21 +2199,21 @@ function trueForgeTurnError(events: TrueForgeRuntimeEvent[]): string | undefined
     if (typeof raw.state.message === "string" && raw.state.message.trim()) {
       return clampText(raw.state.message.trim(), 1_000);
     }
-    return "TrueForge turn ended with an unspecified provider error";
+    return "PatchPilot turn ended with an unspecified provider error";
   }
   return undefined;
 }
 
-function isRecoverableTrueForgeTurnError(message: string): boolean {
+function isRecoverablePatchPilotTurnError(message: string): boolean {
   return /max[_ -]?tokens?\s+breached|token\s+(?:budget|limit)/i.test(message);
 }
 
-function extractTrueForgePendingApproval(
-  events: TrueForgeRuntimeEvent[],
+function extractPatchPilotPendingApproval(
+  events: PatchPilotRuntimeEvent[],
   turnId: string,
   expectedPayloadHash: string,
   candidatePatch?: LiveCandidatePatch
-): TrueForgePendingApproval | undefined {
+): PatchPilotPendingApproval | undefined {
   for (const event of [...events].reverse()) {
     if (event.type !== "tool.approval_required") continue;
     const raw = unwrapRuntimeEvent(event.raw);
@@ -2227,8 +2227,8 @@ function extractTrueForgePendingApproval(
       if (!toolCallId) continue;
       const sourceEventId = firstString(ref, ["sourceEventId", "source_event_id"]);
       const toolCall =
-        findTrueForgeToolCall(events, toolCallId, sourceEventId) ??
-        findTrueForgeToolCall(events, toolCallId);
+        findPatchPilotToolCall(events, toolCallId, sourceEventId) ??
+        findPatchPilotToolCall(events, toolCallId);
       if (!toolCall || !toolCall.name.endsWith("create_fix_pull_request")) continue;
 
       return {
@@ -2241,7 +2241,7 @@ function extractTrueForgePendingApproval(
       };
     }
 
-    const fallbackCall = findTrueForgeToolCallByName(events, "create_fix_pull_request");
+    const fallbackCall = findPatchPilotToolCallByName(events, "create_fix_pull_request");
     if (fallbackCall) {
       return {
         turnId,
@@ -2255,8 +2255,8 @@ function extractTrueForgePendingApproval(
   return undefined;
 }
 
-function findTrueForgeToolCallByName(
-  events: TrueForgeRuntimeEvent[],
+function findPatchPilotToolCallByName(
+  events: PatchPilotRuntimeEvent[],
   targetName: string
 ): { id: string; name: string; arguments: Record<string, unknown> } | undefined {
   for (const event of [...events].reverse()) {
@@ -2277,8 +2277,8 @@ function findTrueForgeToolCallByName(
   return undefined;
 }
 
-function findTrueForgeToolCall(
-  events: TrueForgeRuntimeEvent[],
+function findPatchPilotToolCall(
+  events: PatchPilotRuntimeEvent[],
   toolCallId: string,
   sourceEventId?: string
 ): { name: string; arguments: Record<string, unknown> } | undefined {
@@ -2300,32 +2300,32 @@ function findTrueForgeToolCall(
 }
 
 interface ReconcileSessionEventsOptions {
-  trueForgeRuntime: PatchPilotSessionStarter;
+  patchPilotRuntime: PatchPilotSessionStarter;
   sessionId: string;
   turnId?: string;
-  persistTraceEvent?: TrueForgeRuntimeEventListener;
-  isSettled?: (events: TrueForgeRuntimeEvent[]) => boolean;
+  persistTraceEvent?: PatchPilotRuntimeEventListener;
+  isSettled?: (events: PatchPilotRuntimeEvent[]) => boolean;
   maxPollAttempts?: number;
   pollIntervalMs?: number;
-  ignoreEvents?: TrueForgeRuntimeEvent[];
+  ignoreEvents?: PatchPilotRuntimeEvent[];
 }
 
-async function reconcileSessionEvents(options: ReconcileSessionEventsOptions): Promise<TrueForgeRuntimeEvent[]> {
+async function reconcileSessionEvents(options: ReconcileSessionEventsOptions): Promise<PatchPilotRuntimeEvent[]> {
   const {
-    trueForgeRuntime,
+    patchPilotRuntime,
     sessionId,
     turnId,
     persistTraceEvent,
-    isSettled = isTrueForgeTurnSettled,
+    isSettled = isPatchPilotTurnSettled,
     maxPollAttempts = 60,
     pollIntervalMs = process.env.NODE_ENV === "test" ? 5 : 5000,
     ignoreEvents = []
   } = options;
 
-  let allEvents: TrueForgeRuntimeEvent[] = [];
+  let allEvents: PatchPilotRuntimeEvent[] = [];
   const seenEventKeys = new Set(ignoreEvents.map(runtimeEventKey));
 
-  const recordEvents = async (incoming: TrueForgeRuntimeEvent[]) => {
+  const recordEvents = async (incoming: PatchPilotRuntimeEvent[]) => {
     for (const event of incoming) {
       const key = runtimeEventKey(event);
       if (!seenEventKeys.has(key)) {
@@ -2339,15 +2339,15 @@ async function reconcileSessionEvents(options: ReconcileSessionEventsOptions): P
   };
 
   let streamError: unknown;
-  if (turnId && trueForgeRuntime.subscribeToTurn) {
+  if (turnId && patchPilotRuntime.subscribeToTurn) {
     try {
-      const streamed = await trueForgeRuntime.subscribeToTurn(sessionId, turnId, async (event) => {
+      const streamed = await patchPilotRuntime.subscribeToTurn(sessionId, turnId, async (event) => {
         await recordEvents([event]);
       });
       await recordEvents(streamed);
     } catch (err) {
       streamError = err;
-      console.warn("TrueForge turn stream dropped; falling back to session event polling", err);
+      console.warn("PatchPilot turn stream dropped; falling back to session event polling", err);
     }
   }
 
@@ -2355,10 +2355,10 @@ async function reconcileSessionEvents(options: ReconcileSessionEventsOptions): P
     return allEvents;
   }
 
-  if (trueForgeRuntime.listSessionEvents) {
+  if (patchPilotRuntime.listSessionEvents) {
     for (let attempt = 0; attempt < maxPollAttempts; attempt += 1) {
       try {
-        const listed = await trueForgeRuntime.listSessionEvents(sessionId);
+        const listed = await patchPilotRuntime.listSessionEvents(sessionId);
         if (Array.isArray(listed) && listed.length > 0) {
           await recordEvents(listed);
           if (isSettled(allEvents)) {
@@ -2366,7 +2366,7 @@ async function reconcileSessionEvents(options: ReconcileSessionEventsOptions): P
           }
         }
       } catch (pollError) {
-        console.warn("Transient TrueForge listSessionEvents error during reconciliation:", pollError);
+        console.warn("Transient PatchPilot listSessionEvents error during reconciliation:", pollError);
       }
       await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
     }
@@ -2376,42 +2376,42 @@ async function reconcileSessionEvents(options: ReconcileSessionEventsOptions): P
     throw streamError;
   }
 
-  throw new Error("TrueForge turn did not reach its expected terminal event before reconciliation timed out");
+  throw new Error("PatchPilot turn did not reach its expected terminal event before reconciliation timed out");
 }
 
-function runtimeEventKey(event: TrueForgeRuntimeEvent): string {
+function runtimeEventKey(event: PatchPilotRuntimeEvent): string {
   const raw = unwrapRuntimeEvent(event.raw);
   return isRecord(raw) && typeof raw.id === "string"
     ? raw.id
     : `${event.sequenceNumber ?? "seq"}-${event.type}-${createHash("sha256").update(JSON.stringify(raw ?? {})).digest("hex").slice(0, 16)}`;
 }
 
-async function monitorTrueForgeTurn(
+async function monitorPatchPilotTurn(
   dataDir: string | undefined,
   record: PersistedWebhookRunRecord,
-  trueForgeRuntime: PatchPilotSessionStarter,
+  patchPilotRuntime: PatchPilotSessionStarter,
   githubClient: GitHubRestClientLike | undefined,
   postgresStore?: PostgresStore
 ): Promise<void> {
-  if (!record.trueForge.session?.id || !record.trueForge.turn?.id || !trueForgeRuntime.subscribeToTurn) {
+  if (!record.patchPilot.session?.id || !record.patchPilot.turn?.id || !patchPilotRuntime.subscribeToTurn) {
     return;
   }
 
   try {
     let liveRecord = record;
-    let activeTurnId = record.trueForge.turn.id;
+    let activeTurnId = record.patchPilot.turn.id;
     let liveEventIndex = 0;
-    const persistTraceEvent: TrueForgeRuntimeEventListener = async (event) => {
-      const projected = projectTrueForgeEvent(event, liveEventIndex);
+    const persistTraceEvent: PatchPilotRuntimeEventListener = async (event) => {
+      const projected = projectPatchPilotEvent(event, liveEventIndex);
       liveEventIndex += 1;
       if (projected.length === 0) return;
-      const previousEvents = liveRecord.trueForge.events ?? [];
+      const previousEvents = liveRecord.patchPilot.events ?? [];
       const nextEvents = mergeHarnessEvents(previousEvents, projected);
       if (JSON.stringify(previousEvents) === JSON.stringify(nextEvents)) return;
       liveRecord = {
         ...liveRecord,
-        trueForge: {
-          ...liveRecord.trueForge,
+        patchPilot: {
+          ...liveRecord.patchPilot,
           events: nextEvents
         }
       };
@@ -2419,23 +2419,23 @@ async function monitorTrueForgeTurn(
     };
 
     let events = await reconcileSessionEvents({
-      trueForgeRuntime,
-      sessionId: record.trueForge.session.id,
-      turnId: record.trueForge.turn.id,
+      patchPilotRuntime,
+      sessionId: record.patchPilot.session.id,
+      turnId: record.patchPilot.turn.id,
       persistTraceEvent,
-      isSettled: isTrueForgeTurnSettled
+      isSettled: isPatchPilotTurnSettled
     });
 
     let completed = events.some((event) => event.type === "turn.done");
-    let settled = isTrueForgeTurnSettled(events);
-    let turnError = trueForgeTurnError(events);
+    let settled = isPatchPilotTurnSettled(events);
+    let turnError = patchPilotTurnError(events);
     let result = settled ? extractLiveProofResult(events, record) : undefined;
     if (result) {
       result = await hydratePatchEvidence(result, record, githubClient);
     }
-    if (settled && !result && trueForgeRuntime.listSessionEvents) {
+    if (settled && !result && patchPilotRuntime.listSessionEvents) {
       try {
-        const persistedEvents = await trueForgeRuntime.listSessionEvents(record.trueForge.session.id);
+        const persistedEvents = await patchPilotRuntime.listSessionEvents(record.patchPilot.session.id);
         if (persistedEvents.length > 0) {
           events = [...events, ...persistedEvents];
           for (const event of persistedEvents) {
@@ -2447,7 +2447,7 @@ async function monitorTrueForgeTurn(
           }
         }
       } catch (error) {
-        console.error("TrueForge persisted event refresh failed", error);
+        console.error("PatchPilot persisted event refresh failed", error);
       }
     }
     const maxContinuationTurns = 3;
@@ -2455,52 +2455,52 @@ async function monitorTrueForgeTurn(
       let continuationAttempt = 1;
       completed &&
         !result &&
-        trueForgeRuntime.requestProofContract &&
+        patchPilotRuntime.requestProofContract &&
         continuationAttempt <= maxContinuationTurns &&
-        (!turnError || isRecoverableTrueForgeTurnError(turnError));
+        (!turnError || isRecoverablePatchPilotTurnError(turnError));
       continuationAttempt += 1
     ) {
       try {
-        const recoveryTurn = await trueForgeRuntime.requestProofContract(record.trueForge.session.id);
+        const recoveryTurn = await patchPilotRuntime.requestProofContract(record.patchPilot.session.id);
         activeTurnId = recoveryTurn.id;
         liveRecord = {
           ...liveRecord,
-          trueForge: {
-            ...liveRecord.trueForge,
+          patchPilot: {
+            ...liveRecord.patchPilot,
             status: "started",
             turn: recoveryTurn,
-            error: `TrueForge workflow continuation ${continuationAttempt}/${maxContinuationTurns} requested`
+            error: `PatchPilot workflow continuation ${continuationAttempt}/${maxContinuationTurns} requested`
           }
         };
         await appendUpdatedLiveRecord(dataDir, liveRecord, postgresStore);
 
         const recoveryEvents = await reconcileSessionEvents({
-          trueForgeRuntime,
-          sessionId: record.trueForge.session.id,
+          patchPilotRuntime,
+          sessionId: record.patchPilot.session.id,
           turnId: recoveryTurn.id,
           persistTraceEvent,
-          isSettled: isTrueForgeTurnSettled,
+          isSettled: isPatchPilotTurnSettled,
           ignoreEvents: events
         });
         events = [...events, ...recoveryEvents];
         completed = events.some((event) => event.type === "turn.done");
-        settled = isTrueForgeTurnSettled(events);
-        turnError = trueForgeTurnError(recoveryEvents);
+        settled = isPatchPilotTurnSettled(events);
+        turnError = patchPilotTurnError(recoveryEvents);
         result = settled ? extractLiveProofResult(events, record) : undefined;
         if (result) {
           result = await hydratePatchEvidence(result, record, githubClient);
         }
       } catch (error) {
-        console.error("TrueForge workflow continuation failed", error);
+        console.error("PatchPilot workflow continuation failed", error);
         break;
       }
     }
     const eventMetadata = mergeHarnessEvents(
-      liveRecord.trueForge.events ?? [],
-      events.flatMap((event, index) => projectTrueForgeEvent(event, index))
+      liveRecord.patchPilot.events ?? [],
+      events.flatMap((event, index) => projectPatchPilotEvent(event, index))
     );
     const pendingApproval = result?.candidatePatch
-      ? extractTrueForgePendingApproval(events, activeTurnId, result.candidatePatch.hash, result.candidatePatch)
+      ? extractPatchPilotPendingApproval(events, activeTurnId, result.candidatePatch.hash, result.candidatePatch)
       : undefined;
     const requiresExecutableProof = Boolean(result && (result.status === "verified" || result.candidatePatch));
     const validResult = Boolean(
@@ -2516,17 +2516,17 @@ async function monitorTrueForgeTurn(
         run,
         "failed",
         result?.candidatePatch
-          ? "TrueForge returned a patch without a matching native approval checkpoint"
+          ? "PatchPilot returned a patch without a matching native approval checkpoint"
           : turnError
-            ? `TrueForge turn failed: ${turnError}`
-            : "TrueForge completed without a valid patchpilot.result contract"
+            ? `PatchPilot turn failed: ${turnError}`
+            : "PatchPilot completed without a valid patchpilot.result contract"
       );
     }
     const completedRecord: PersistedWebhookRunRecord = {
       ...liveRecord,
       run,
-      trueForge: {
-        ...liveRecord.trueForge,
+      patchPilot: {
+        ...liveRecord.patchPilot,
         status: pendingApproval ? "paused" : completed ? "completed" : "started",
         ...(pendingApproval
           ? { error: undefined }
@@ -2534,11 +2534,11 @@ async function monitorTrueForgeTurn(
             ? validResult
               ? { error: undefined }
               : { error: result?.candidatePatch
-                  ? "TrueForge patch did not match a native approval checkpoint"
+                  ? "PatchPilot patch did not match a native approval checkpoint"
                   : turnError
-                    ? `TrueForge turn failed: ${turnError}`
-                    : "TrueForge completed without a valid patchpilot.result contract" }
-          : { error: "TrueForge turn is still running; completion has not been observed" }),
+                    ? `PatchPilot turn failed: ${turnError}`
+                    : "PatchPilot completed without a valid patchpilot.result contract" }
+          : { error: "PatchPilot turn is still running; completion has not been observed" }),
         events: eventMetadata,
         ...(pendingApproval ? { pendingApproval } : {}),
         ...(result ? { result } : {})
@@ -2552,18 +2552,18 @@ async function monitorTrueForgeTurn(
     const commentedRecord = await appendGitHubComment(approvalLabeledRecord, githubClient, validResult ? "completed" : "failed");
     await appendUpdatedLiveRecord(dataDir, commentedRecord, postgresStore);
   } catch (error) {
-    console.error("TrueForge turn subscription failed", error);
+    console.error("PatchPilot turn subscription failed", error);
     let failedRun = record.run;
     if (failedRun.status === "environment-building") {
-      failedRun = transitionRun(failedRun, "failed", "TrueForge turn monitoring failed");
+      failedRun = transitionRun(failedRun, "failed", "PatchPilot turn monitoring failed");
     }
     const failedRecord = {
       ...record,
       run: failedRun,
-      trueForge: {
-        ...record.trueForge,
+      patchPilot: {
+        ...record.patchPilot,
         status: "failed",
-        error: "TrueForge turn monitoring failed"
+        error: "PatchPilot turn monitoring failed"
       }
     } satisfies PersistedWebhookRunRecord;
     const commentedRecord = await appendGitHubComment(failedRecord, githubClient, "failed");
@@ -2571,7 +2571,7 @@ async function monitorTrueForgeTurn(
   }
 }
 
-function projectTrueForgeEvent(event: TrueForgeRuntimeEvent, fallbackIndex = 0): HarnessTraceEvent[] {
+function projectPatchPilotEvent(event: PatchPilotRuntimeEvent, fallbackIndex = 0): HarnessTraceEvent[] {
   const raw = unwrapRuntimeEvent(event.raw);
   if (!isRecord(raw)) return [];
 
@@ -2587,7 +2587,7 @@ function projectTrueForgeEvent(event: TrueForgeRuntimeEvent, fallbackIndex = 0):
     sequenceNumber: event.sequenceNumber,
     at,
     type,
-    source: "trueforge" as const
+    source: "patchpilot" as const
   };
 
   if (type === "model.message" && toolCalls.length > 0) {
@@ -2645,7 +2645,7 @@ function projectTrueForgeEvent(event: TrueForgeRuntimeEvent, fallbackIndex = 0):
       id: eventId,
       category: "approval",
       status: "running",
-      summary: "TrueForge paused the GitHub write for maintainer approval",
+      summary: "PatchPilot paused the GitHub write for maintainer approval",
       toolName: "create_fix_pull_request",
       artifact: "write held"
     }];
@@ -2714,8 +2714,8 @@ function summaryForTool(name: string, args: Record<string, unknown>): string {
 
 function summaryForEvent(type: string): string {
   if (type === "mcp.initialize") return "GitHub MCP connection initialized";
-  if (type === "turn.created") return "TrueForge turn created";
-  if (type === "turn.done") return "TrueForge turn completed";
+  if (type === "turn.created") return "PatchPilot turn created";
+  if (type === "turn.done") return "PatchPilot turn completed";
   return `${type.replace(/[._-]+/g, " ")} event received`;
 }
 
@@ -2780,7 +2780,7 @@ function redactHarnessText(value: string): string {
   );
 }
 
-function extractLiveProofResult(events: TrueForgeRuntimeEvent[], record: PersistedWebhookRunRecord): LiveProofResult | undefined {
+function extractLiveProofResult(events: PatchPilotRuntimeEvent[], record: PersistedWebhookRunRecord): LiveProofResult | undefined {
   const submittedResult = extractSubmittedPatchPilotResult(events);
   const doneEvents = events.filter((event) => event.type === "turn.done").reverse();
   const streamedDeltaText = joinBoundedTexts(
@@ -2803,7 +2803,7 @@ function extractLiveProofResult(events: TrueForgeRuntimeEvent[], record: Persist
     .find((candidate): candidate is Record<string, unknown> => candidate !== undefined);
   if (!parsed) {
     const joinedOutput = outputTexts.join("");
-    console.error("TrueForge completion had no parsable proof contract", JSON.stringify({
+    console.error("PatchPilot completion had no parsable proof contract", JSON.stringify({
       outputCount: outputTexts.length,
       outputLengths: outputTexts.map((output) => output.length),
       joinedLength: joinedOutput.length,
@@ -2825,11 +2825,11 @@ function extractLiveProofResult(events: TrueForgeRuntimeEvent[], record: Persist
     return undefined;
   }
   if ((status === "patch-ready" || status === "verified") && !submittedResult) {
-    console.error("TrueForge positive proof was not submitted through submit_patchpilot_result");
+    console.error("PatchPilot positive proof was not submitted through submit_patchpilot_result");
     return undefined;
   }
 
-  const summary = clampText(typeof parsed.summary === "string" ? parsed.summary : `TrueForge reported ${status}`, 2_000);
+  const summary = clampText(typeof parsed.summary === "string" ? parsed.summary : `PatchPilot reported ${status}`, 2_000);
   const proof = isRecord(parsed.proof)
     ? {
         ...(typeof parsed.proof.before === "string" ? { before: clampText(parsed.proof.before, 2_000) } : {}),
@@ -2862,7 +2862,7 @@ function extractLiveProofResult(events: TrueForgeRuntimeEvent[], record: Persist
   };
 }
 
-function extractSubmittedPatchPilotResult(events: TrueForgeRuntimeEvent[]): Record<string, unknown> | undefined {
+function extractSubmittedPatchPilotResult(events: PatchPilotRuntimeEvent[]): Record<string, unknown> | undefined {
   for (const event of [...events].reverse()) {
     if (event.type !== "model.message") continue;
     const raw = unwrapRuntimeEvent(event.raw);
@@ -3021,7 +3021,7 @@ function applyLiveProofResult(run: ReturnType<typeof createRun>, result: LivePro
   if (result.candidatePatch) {
     for (const status of ["reproducing", "verified", "minimizing", "fixing", "validating", "patch-ready", "awaiting-approval"] as const) {
       if (canTransition(run.status, status)) {
-        run = transitionRun(run, status, `TrueForge proof: ${status}`, {
+        run = transitionRun(run, status, `PatchPilot proof: ${status}`, {
           evidence: { summary: result.summary, ...(result.proof ? { proof: result.proof } : {}) }
         });
       }
@@ -3030,13 +3030,13 @@ function applyLiveProofResult(run: ReturnType<typeof createRun>, result: LivePro
   }
 
   if (result.status === "not-reproduced" && canTransition(run.status, "reproducing")) {
-    run = transitionRun(run, "reproducing", "TrueForge attempted reproduction");
+    run = transitionRun(run, "reproducing", "PatchPilot attempted reproduction");
     if (canTransition(run.status, "not-reproduced")) {
       return transitionRun(run, "not-reproduced", result.summary);
     }
   }
   if (result.status === "verified" && canTransition(run.status, "reproducing")) {
-    run = transitionRun(run, "reproducing", "TrueForge reproduced the issue");
+    run = transitionRun(run, "reproducing", "PatchPilot reproduced the issue");
     if (canTransition(run.status, "verified")) {
       return transitionRun(run, "verified", result.summary);
     }
@@ -3288,7 +3288,7 @@ function githubMcpHandlerFromEnv(githubClient: GitHubRestClientLike | undefined)
   });
 }
 
-function trueForgeRuntimeFromEnv(githubClient: GitHubRestClientLike | undefined): PatchPilotSessionStarter | undefined {
+function patchPilotRuntimeFromEnv(githubClient: GitHubRestClientLike | undefined): PatchPilotSessionStarter | undefined {
   const model = modelClientFromEnv();
   if (!model || !githubClient) {
     return undefined;

@@ -197,10 +197,10 @@ function HarnessPanel({ harness }: { harness: HarnessState }) {
   const statusLabel = harness.status === "paused" ? "Paused for approval" : harness.status === "not-configured" ? "Not connected" : harness.status;
   const latestComment = harness.commentHistory.at(-1);
   return (
-    <section className={`harness-panel harness-${harness.status}`} aria-label="TrueForge harness">
+    <section className={`harness-panel harness-${harness.status}`} aria-label="PatchPilot harness">
       <div className="harness-summary">
         <div className="harness-copy">
-          <p className="eyebrow">TrueForge activity</p>
+          <p className="eyebrow">PatchPilot activity</p>
           <h2>{harness.currentTask}</h2>
         </div>
         <div className="harness-state"><span className="state-dot" />{statusLabel}</div>
@@ -249,7 +249,7 @@ function ApprovalPanel({ run, currentStatus, pullRequest, approval, approvalErro
   const patch = run.candidatePatch;
   return (
     <section className="panel approval-panel">
-      <PanelTitle eyebrow="Mutation gate" title={pullRequest ? "Draft pull request" : patch ? "TrueForge paused" : "Awaiting proof"} icon={<Lock size={17} />} />
+      <PanelTitle eyebrow="Mutation gate" title={pullRequest ? "Draft pull request" : patch ? "PatchPilot paused" : "Awaiting proof"} icon={<Lock size={17} />} />
       {patch ? <>
         <div className="approval-request">
           <strong>{pullRequest ? "GitHub write completed" : "Requested action"}</strong>
