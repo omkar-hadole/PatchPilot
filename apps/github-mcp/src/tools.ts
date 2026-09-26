@@ -123,7 +123,11 @@ export function createGitHubMcpTools({ client }: GitHubMcpServerOptions) {
         case "read_file": {
           const { owner, repo, path, ref } = parseReadFileArgs(call.arguments);
           const file = await client.getFile(owner, repo, path, ref);
-          return textResult(JSON.stringify(file, null, 2));
+          const content =
+            file.encoding.toLowerCase() === "base64"
+              ? Buffer.from(file.content.replace(/\s+/g, ""), "base64").toString("utf8")
+              : file.content;
+          return textResult(JSON.stringify({ path: file.path, sha: file.sha, content }, null, 2));
         }
 
         case "submit_byter_result": {

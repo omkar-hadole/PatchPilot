@@ -34,6 +34,47 @@ describe("GitHub MCP tools", () => {
     expect(result.content[0]?.text).toContain("\"title\": \"Bug\"");
   });
 
+  it("decodes base64 file content before returning it to the model", async () => {
+    const client = {
+      getFile: vi.fn().mockResolvedValue({
+        path: "src/tokenizer.ts",
+        sha: "abc123",
+        encoding: "base64",
+        content: Buffer.from("export const answer = 42;\n", "utf8").toString("base64")
+      })
+    };
+    const tools = createGitHubMcpTools({ client: client as never });
+
+    const result = await tools.callTool({
+      name: "read_file",
+      arguments: { owner: "o", repo: "r", path: "src/tokenizer.ts" }
+    });
+
+    const parsed = JSON.parse(result.content[0]!.text);
+    expect(parsed.content).toBe("export const answer = 42;\n");
+    expect(parsed).not.toHaveProperty("encoding");
+  });
+
+  it("passes through already-plain file content unchanged", async () => {
+    const client = {
+      getFile: vi.fn().mockResolvedValue({
+        path: "src/plain.ts",
+        sha: "def456",
+        encoding: "utf-8",
+        content: "export const plain = true;\n"
+      })
+    };
+    const tools = createGitHubMcpTools({ client: client as never });
+
+    const result = await tools.callTool({
+      name: "read_file",
+      arguments: { owner: "o", repo: "r", path: "src/plain.ts" }
+    });
+
+    const parsed = JSON.parse(result.content[0]!.text);
+    expect(parsed.content).toBe("export const plain = true;\n");
+  });
+
   it("accepts a proof contract without calling GitHub", async () => {
     const client = { createIssueComment: vi.fn(), addLabels: vi.fn() };
     const tools = createGitHubMcpTools({ client: client as never });

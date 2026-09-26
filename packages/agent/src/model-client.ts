@@ -36,12 +36,16 @@ export interface ModelClientConfig {
 
 export class ModelHttpError extends Error {
   readonly status: number;
-  constructor(status: number, message: string) {
+  readonly retryAfterMs?: number;
+  constructor(status: number, message: string, retryAfterMs?: number) {
     super(message);
     this.name = "ModelHttpError";
     this.status = status;
+    this.retryAfterMs = retryAfterMs;
   }
 }
+
+const maxRetryAfterMs = 60_000;
 
 const defaultBaseUrl = "https://api.openai.com/v1";
 
@@ -53,7 +57,7 @@ export class ModelClient implements ModelClientLike {
       apiKey: config.apiKey,
       baseUrl: config.baseUrl ?? defaultBaseUrl,
       model: config.model,
-      maxRetries: config.maxRetries ?? 4,
+      maxRetries: config.maxRetries ?? 6,
       requestTimeoutMs: config.requestTimeoutMs ?? 120_000
     };
   }
@@ -89,7 +93,12 @@ export class ModelClient implements ModelClientLike {
 
         if (!response.ok) {
           const text = await response.text().catch(() => "");
-          throw new ModelHttpError(response.status, `Model request failed (${response.status}): ${text.slice(0, 500)}`);
+          const retryAfterMs = response.status === 429 ? parseRetryAfterMs(response.headers.get("retry-after"), text) : undefined;
+          throw new ModelHttpError(
+            response.status,
+            `Model request failed (${response.status}): ${text.slice(0, 500)}`,
+            retryAfterMs
+          );
         }
 
         const payload = (await response.json()) as Record<string, unknown>;
@@ -111,7 +120,8 @@ export class ModelClient implements ModelClientLike {
           throw error;
         }
         const backoffMs = Math.min(2 ** attempt * 500, 15_000) + Math.floor(Math.random() * 250);
-        await sleep(backoffMs);
+        const suggestedMs = error instanceof ModelHttpError ? error.retryAfterMs : undefined;
+        await sleep(suggestedMs ? Math.min(Math.max(suggestedMs, backoffMs), maxRetryAfterMs) : backoffMs);
       }
     }
     throw lastError;
@@ -126,6 +136,21 @@ function isRetryable(error: unknown): boolean {
     return error.name === "AbortError" || /network|fetch failed|ECONNRESET|ETIMEDOUT/i.test(error.message);
   }
   return false;
+}
+
+export function parseRetryAfterMs(header: string | null, bodyText: string): number | undefined {
+  if (header) {
+    const seconds = Number(header);
+    if (Number.isFinite(seconds)) return seconds * 1000;
+    const dateMs = Date.parse(header);
+    if (!Number.isNaN(dateMs)) return Math.max(0, dateMs - Date.now());
+  }
+  const match = bodyText.match(/try again in\s+([\d.]+)\s*(ms|s)\b/i);
+  if (match) {
+    const value = Number(match[1]);
+    if (Number.isFinite(value)) return match[2].toLowerCase() === "ms" ? value : value * 1000;
+  }
+  return undefined;
 }
 
 function sleep(ms: number): Promise<void> {
