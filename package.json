@@ -15,7 +15,12 @@
     "test": "pnpm -r --workspace-concurrency=1 test",
     "typecheck": "pnpm -r --workspace-concurrency=1 typecheck",
     "start": "pnpm --filter @byter/server start",
-    "verify": "pnpm build && pnpm lint && pnpm typecheck && pnpm test"
+    "verify": "pnpm build && pnpm lint && pnpm typecheck && pnpm test",
+    "smoke-test": "node --experimental-strip-types scripts/smoke-test.ts"
+  },
+  "dependencies": {
+    "@byter/agent": "workspace:*",
+    "@byter/github": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

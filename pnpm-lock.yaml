@@ -7,6 +7,13 @@ settings:
 importers:
 
   .:
+    dependencies:
+      '@byter/agent':
+        specifier: workspace:*
+        version: link:packages/agent
+      '@byter/github':
+        specifier: workspace:*
+        version: link:packages/github
     devDependencies:
       '@types/node':
         specifier: ^22.0.0
