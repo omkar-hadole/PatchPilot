@@ -1,12 +1,17 @@
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createPatchPilotServer } from "./server.js";
 
-// Auto-load root .env or local .env if present
-const rootEnvPath = resolve(process.cwd(), ".env");
-if (existsSync(rootEnvPath) && typeof process.loadEnvFile === "function") {
+// Always resolve .env relative to the repo root (this file's location),
+// not process.cwd() -- `pnpm --filter @patchpilot/server start` runs with
+// cwd=apps/server, so a cwd-relative lookup would silently read a
+// different, stale apps/server/.env instead of the repo's real one.
+const repoRootEnvPath = resolve(dirname(fileURLToPath(import.meta.url)), "../../../.env");
+const envPath = existsSync(repoRootEnvPath) ? repoRootEnvPath : resolve(process.cwd(), ".env");
+if (existsSync(envPath) && typeof process.loadEnvFile === "function") {
   try {
-    process.loadEnvFile(rootEnvPath);
+    process.loadEnvFile(envPath);
   } catch {
     // ignore
   }
