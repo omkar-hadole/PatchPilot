@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "composite": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "paths": {
+      "@byter/github": ["../../packages/github/src/index.js"]
+    }
+  },
+  "references": [{ "path": "../../packages/github" }],
+  "include": ["src/**/*.ts"],
+  "exclude": ["dist", "test"]
+}

@@ -1,0 +1,49 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Local runtime state
+.byter/
+.agents/
+PROJECT.md
+PROJECT_STATE.md
+docs/DECISIONS.md
+NEEDS_USER.md
+
+# Reference clones and scratch
+trueforge-repo/
+scratch/
+.railway-deploy*/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Local demo media
+*.mp3
+*.mp4
+*.webm
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json

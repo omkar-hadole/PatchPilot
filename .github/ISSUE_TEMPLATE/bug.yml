@@ -1,0 +1,47 @@
+name: Reproduce a bug
+description: Ask Byter to reproduce a specific repository failure.
+title: "bug: "
+labels:
+  - byter:run
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Include a focused failure report. Byter will scan the issue before starting a sandbox.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Failure summary
+      description: What breaks, and on which input?
+      placeholder: The tokenizer crashes when the pattern ends with a trailing backslash.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction command
+      description: Give the smallest command or test that reproduces the failure.
+      placeholder: pnpm vitest tests/tokenizer.test.ts -t "trailing backslash"
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behavior
+      placeholder: |
+        Expected: the trailing slash is a literal token.
+        Actual: TypeError: Cannot read properties of undefined.
+    validations:
+      required: true
+  - type: input
+    id: runtime
+    attributes:
+      label: Language and runtime
+      placeholder: Node 22 / pnpm 10
+  - type: checkboxes
+    id: trigger
+    attributes:
+      label: Run request
+      options:
+        - label: I want Byter to investigate this issue.
+          required: true

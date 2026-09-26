@@ -1,0 +1,11 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/core" },
+    { "path": "./packages/github" },
+    { "path": "./packages/agent" },
+    { "path": "./apps/github-mcp" },
+    { "path": "./apps/web" },
+    { "path": "./demo/buggy-parser" }
+  ]
+}

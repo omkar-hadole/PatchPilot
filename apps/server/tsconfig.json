@@ -1,0 +1,23 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "composite": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "paths": {
+      "@byter/agent": ["../../packages/agent/src/index.ts"],
+      "@byter/core": ["../../packages/core/src/index.js"],
+      "@byter/github-mcp": ["../github-mcp/src/index.ts"],
+      "@byter/github": ["../../packages/github/src/index.js"]
+    }
+  },
+  "references": [
+    { "path": "../../packages/agent" },
+    { "path": "../github-mcp" },
+    { "path": "../../packages/core" },
+    { "path": "../../packages/github" }
+  ],
+  "include": ["src/**/*.ts"],
+  "exclude": ["dist", "test"]
+}
