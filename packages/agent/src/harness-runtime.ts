@@ -6,7 +6,7 @@ import {
   type GitHubMcpWriteToolName,
   type GitHubRestClientLike
 } from "@byter/github-mcp";
-import type { ModelClientLike, ModelMessage, ModelToolSchema } from "./model-client.js";
+import { ModelHttpError, type ModelClientLike, type ModelMessage, type ModelToolSchema } from "./model-client.js";
 import { LocalSandboxProvider, type SandboxProvider, type SandboxWorkspace } from "./sandbox.js";
 import { buildInitialUserMessage, buildProofContractRecoveryMessage, buildHarnessSystemPrompt } from "./byter-agent.js";
 import type {
@@ -162,11 +162,33 @@ export class PatchPilotHarnessRuntime {
   }
 
   private async runLoop(session: SessionRecord, turnId: string): Promise<void> {
+    const maxMalformedGenerationRetries = 3;
+    let malformedGenerationRetries = 0;
+
     for (let iteration = 0; iteration < this.maxIterations; iteration++) {
       let response;
       try {
         response = await this.model.chat(session.messages, toolSchemas());
       } catch (error) {
+        if (isMalformedGenerationError(error) && malformedGenerationRetries < maxMalformedGenerationRetries) {
+          malformedGenerationRetries += 1;
+          this.recordEvent(session, turnId, {
+            type: "agent.recovery",
+            raw: {
+              type: "agent.recovery",
+              id: randomUUID(),
+              created_at: new Date().toISOString(),
+              content: `Model generated a tool call the provider could not parse (attempt ${malformedGenerationRetries}/${maxMalformedGenerationRetries}); asking it to retry with valid, unencoded arguments.`
+            }
+          });
+          session.messages.push({
+            role: "user",
+            content:
+              "Your last tool call could not be parsed as valid JSON, most likely because it contained a large base64-encoded blob or another oversized encoded string in a single argument. Do not encode file contents. Retry the same step using a heredoc with plain literal text, split across multiple smaller run_command calls if the content is large."
+          });
+          continue;
+        }
+
         this.recordDoneEvent(session, turnId, error instanceof Error ? error.message : "Model call failed");
         await session.sandbox?.cleanup();
         return;
@@ -312,6 +334,12 @@ export class PatchPilotHarnessRuntime {
     turnEvents.push(sequenced);
     session.eventsByTurn.set(turnId, turnEvents);
   }
+}
+
+function isMalformedGenerationError(error: unknown): boolean {
+  if (!(error instanceof ModelHttpError)) return false;
+  if (error.status !== 400) return false;
+  return /tool[_ ]?(use|call)[_ ]?(failed|invalid)|failed to parse tool call/i.test(error.message);
 }
 
 function toolSchemas(): ModelToolSchema[] {

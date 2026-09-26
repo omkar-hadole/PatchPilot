@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { PatchPilotHarnessRuntime } from "../src/harness-runtime.js";
-import type { ModelClientLike, ModelMessage, ModelResponse, ModelToolSchema } from "../src/model-client.js";
+import { ModelHttpError, type ModelClientLike, type ModelMessage, type ModelResponse, type ModelToolSchema } from "../src/model-client.js";
 import type { SandboxExecutionResult, SandboxProvider, SandboxWorkspace } from "../src/sandbox.js";
 import type { GitHubRestClientLike } from "@byter/github-mcp";
 
@@ -209,6 +209,35 @@ describe("PatchPilotHarnessRuntime", () => {
     const resumedEvents = await runtime.subscribeToTurn(session.id, resumedTurn.id);
     expect(pullRequestCreated).toBe(false);
     expect(resumedEvents.some((event) => event.type === "turn.done")).toBe(true);
+  });
+
+  it("recovers from a malformed tool-call generation error instead of ending the turn", async () => {
+    let call = 0;
+    const model: ModelClientLike = {
+      async chat(): Promise<ModelResponse> {
+        call += 1;
+        if (call === 1) {
+          throw new ModelHttpError(400, 'Failed to parse tool call arguments as JSON: {"error":{"code":"tool_use_failed"}}');
+        }
+        return { content: "No further action needed.", toolCalls: [], finishReason: "stop" };
+      }
+    };
+
+    const runtime = new PatchPilotHarnessRuntime({
+      githubClient: fakeGitHubClient(),
+      model,
+      sandboxProvider: fakeSandbox()
+    });
+
+    const { session, turn } = await runtime.startSession(baseInput);
+    const events = await runtime.subscribeToTurn(session.id, turn.id);
+
+    expect(call).toBe(2);
+    expect(events.some((event) => event.type === "agent.recovery")).toBe(true);
+    const doneEvent = events.find((event) => event.type === "turn.done");
+    expect(doneEvent).toBeDefined();
+    const raw = doneEvent!.raw as { state: { status: string } };
+    expect(raw.state.status).toBe("completed");
   });
 
   it("marks turn.done with a recoverable error when the iteration budget is exhausted", async () => {
